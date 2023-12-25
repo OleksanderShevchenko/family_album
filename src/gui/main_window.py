@@ -37,8 +37,9 @@ class MainWindow(QMainWindow):
         if os.path.isdir(selected_dir):
             message = f'Selected directory {selected_dir}.'
             self.statusBar().showMessage(message, self._interval)
+            self.file_view.selected_path = selected_dir
         elif os.path.isfile(selected_dir):
             message = f'Selected file {selected_dir}.'
             self.statusBar().showMessage(message, self._interval)
-        self.file_view.selected_path = selected_dir
+
 

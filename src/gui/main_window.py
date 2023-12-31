@@ -41,5 +41,3 @@ class MainWindow(QMainWindow):
         elif os.path.isfile(selected_dir):
             message = f'Selected file {selected_dir}.'
             self.statusBar().showMessage(message, self._interval)
-
-

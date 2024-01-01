@@ -24,6 +24,7 @@ class MainWindow(QMainWindow):
         self.dir_viewer = DirectoryView(self)
         self.dir_viewer.ItemSelected.connect(self.evt_dir_selected)
         self.file_view = FileView(self)
+        self.file_view.ItemSelected.connect(self.evt_show_in_statusbar)
         layout1 = QVBoxLayout()
         # insert input widget to this layout
         layout1.addWidget(self.dir_viewer)
@@ -41,3 +42,6 @@ class MainWindow(QMainWindow):
         elif os.path.isfile(selected_dir):
             message = f'Selected file {selected_dir}.'
             self.statusBar().showMessage(message, self._interval)
+
+    def evt_show_in_statusbar(self, message: str) -> None:
+        self.statusBar().showMessage(message, self._interval)

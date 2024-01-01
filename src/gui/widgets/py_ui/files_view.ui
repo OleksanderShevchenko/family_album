@@ -53,6 +53,9 @@
         <layout class="QHBoxLayout" name="horizontalLayout">
          <item>
           <widget class="QPushButton" name="pbAnalyze">
+           <property name="toolTip">
+            <string>Calculate how many files and subfolders are in selected folder</string>
+           </property>
            <property name="text">
             <string>Analyze</string>
            </property>
@@ -78,15 +81,28 @@
              <height>30</height>
             </size>
            </property>
+           <property name="toolTip">
+            <string>Search for duplicate files by comparing file's hash between all files in selected folder and its subfolders</string>
+           </property>
            <property name="text">
             <string>Check for duplicate</string>
            </property>
           </widget>
          </item>
          <item>
-          <widget class="QPushButton" name="pbMove">
+          <widget class="QPushButton" name="pbDumpDuplications">
            <property name="text">
-            <string>Move duplications ...</string>
+            <string>Save duplication results</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="pbMove">
+           <property name="toolTip">
+            <string>Move all duplicate files to 'duplications' subfolder in currently selected folder</string>
+           </property>
+           <property name="text">
+            <string>Move duplications</string>
            </property>
           </widget>
          </item>

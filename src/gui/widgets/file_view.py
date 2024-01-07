@@ -79,18 +79,17 @@ class FileView(QtWidgets.QWidget):
                 model = QStringListModel(original_files)
                 self.lst_original_files.setModel(model)
                 self.lst_original_files.selectionModel().currentChanged.connect(self.evt_original_file_selected)
+                if len(self.duplications) > 0:
+                    self.pbDumpDuplications.setEnabled(True)
+                    self.pbMove.setEnabled(True)
+                    duplicated_files_count = sum([len(item) for item in self.duplications.values()])
+                    files_with_duplicates_count = len(self.duplications)
+                    message = (f"Totally were found {files_with_duplicates_count} files with duplicates. " +
+                               f"Total number of duplicate files are - {duplicated_files_count}")
+                    self.ItemSelected.emit(message)
+                    self.__show_message(message)
             else:
                 self.__show_message("No duplication files found")
-            if len(self.duplications) > 0:
-                self.pbDumpDuplications.setEnabled(True)
-                self.pbMove.setEnabled(True)
-            duplicated_files_count = sum([len(item) for item in self.duplications.values()])
-            files_with_duplicates_count = len(self.duplications)
-            message = (f"Totally were found {files_with_duplicates_count} files with duplicates. " +
-                       f"Total number of duplicate files are - {duplicated_files_count}")
-            self.ItemSelected.emit(message)
-            self.__show_message(message)
-            self
         except Exception as err:
             print(f"Error occur: {err}")
             self.__show_message(f"Error occur: {err}")

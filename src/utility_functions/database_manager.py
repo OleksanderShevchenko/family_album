@@ -1,4 +1,4 @@
-from PyQt5.QtSql import QSqlDatabase, QSqlQuery
+from PyQt5.QtSql import QSqlDatabase, QSqlQuery, QSqlTableModel
 
 from src.utility_functions.database_settings import DatabaseSettings
 
@@ -40,13 +40,29 @@ class DatabaseManager:
         query = QSqlQuery(self.db)
         query.exec(f"CREATE TABLE IF NOT EXISTS {table_name} ({fields})")
 
-    def update_table(self, table_name, data):
-        # Implement update logic here
-        pass
+    def get_table(self, table_name):
+        query = QSqlQuery(self.db)
+        query.exec(f"SELECT * FROM {table_name}")
 
-    def get_table_data(self, table_name):
-        # Implement logic to retrieve data for QTableView
-        pass
+        model = QSqlTableModel()
+        model.setTable(table_name)
+        model.setEditStrategy(QSqlTableModel.OnManualSubmit)
+        model.select()
+
+        return model
+
+    def update_table(self, table_name, data_dict, condition_column, condition_value):
+        query = QSqlQuery(self.db)
+
+        # Construct the UPDATE query
+        update_query = f"UPDATE {table_name} SET "
+        update_query += ', '.join([f"{key} = '{value}'" for key, value in data_dict.items()])
+        update_query += f" WHERE {condition_column} = '{condition_value}'"
+
+        query.exec(update_query)
+
+        # Commit the changes to make them permanent
+        self.db.commit()
 
     def delete_table(self, table_name):
         query = QSqlQuery(self.db)

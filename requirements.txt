@@ -29,11 +29,13 @@ mccabe==0.7.0
 mypy-extensions==1.0.0
 nox==2022.11.21
 numpy==1.26.3
+opencv-python>=4.9
 packaging==23.2
 parso==0.8.3
 pathspec==0.12.1
 pefile==2023.2.7
 pickleshare==0.7.5
+pillow>=10
 platformdirs==4.1.0
 pluggy==1.3.0
 prompt-toolkit==3.0.43
@@ -41,8 +43,9 @@ pycodestyle==2.9.1
 pyflakes==2.5.0
 Pygments==2.17.2
 pyinstaller-hooks-contrib==2023.12
+PyQt5==5.15.10
 PyQt5-Qt5==5.15.2
-PyQt5-sip==12.11.1
+PyQt5-sip==12.13
 pytest==7.4.4
 pywin32-ctypes==0.2.2
 requests==2.31.0

@@ -92,6 +92,7 @@ venv.bak/
 # PyCharm project
 .idea
 idea/
+poetry.lock
 
 # Spyder project settings
 .spyderproject

@@ -13,11 +13,11 @@ from src.utility_functions.get_files_and_subdirs_count import get_files_and_subd
 from src.utility_functions.is_file_image_pil import is_file_a_picture
 
 
-class FileView(QtWidgets.QWidget):
+class DuplicationChecker(QtWidgets.QWidget):
     ItemSelected = pyqtSignal(str)
 
     def __init__(self, parent):
-        super(FileView, self).__init__(parent)
+        super(DuplicationChecker, self).__init__(parent)
         uic.loadUi(path.dirname(__file__) + '/py_ui/files_view.ui', self)
         self._selected_path: str = ""
         self.files_hash: dict = {}
@@ -206,7 +206,7 @@ class FileView(QtWidgets.QWidget):
 if __name__ == "__main__":
     _app = QtWidgets.QApplication(sys.argv)
     dialog = QDialog()
-    dir_viewer = FileView(dialog)
+    dir_viewer = DuplicationChecker(dialog)
     layout1 = QVBoxLayout()
     # insert input widget to this layout
     layout1.addWidget(dir_viewer)

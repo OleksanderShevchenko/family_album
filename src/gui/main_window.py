@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import QMainWindow, QVBoxLayout
 
 # from .plot_canvas import PlotCanvas
 from src.gui.widgets.directory_view import DirectoryView
-from src.gui.widgets.file_view import FileView
+from src.gui.widgets.duplication_checker import DuplicationChecker
 from src.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
 
 
@@ -23,7 +23,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self.title)
         self.dir_viewer = DirectoryView(self)
         self.dir_viewer.ItemSelected.connect(self.evt_dir_selected)
-        self.file_view = FileView(self)
+        self.file_view = DuplicationChecker(self)
         self.file_view.ItemSelected.connect(self.evt_show_in_statusbar)
         layout1 = QVBoxLayout()
         # insert input widget to this layout

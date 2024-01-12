@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import QMainWindow, QVBoxLayout
 # from .plot_canvas import PlotCanvas
 from src.gui.widgets.directory_view import DirectoryView
 from src.gui.widgets.duplication_checker import DuplicationChecker
-from src.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
+from src.gui.widgets.file_organizer import FileOrganizer
 
 
 class MainWindow(QMainWindow):
@@ -23,22 +23,29 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(self.title)
         self.dir_viewer = DirectoryView(self)
         self.dir_viewer.ItemSelected.connect(self.evt_dir_selected)
-        self.file_view = DuplicationChecker(self)
-        self.file_view.ItemSelected.connect(self.evt_show_in_statusbar)
+        self.duplication_checker = DuplicationChecker(self)
+        self.duplication_checker.ItemSelected.connect(self.evt_show_in_statusbar)
+        self.file_organizer = FileOrganizer(self)
+        self.file_organizer.ItemSelected.connect(self.evt_show_in_statusbar)
         layout1 = QVBoxLayout()
         # insert input widget to this layout
         layout1.addWidget(self.dir_viewer)
         self.directories_space.setLayout(layout1)
 
         layout2 = QVBoxLayout()
-        layout2.addWidget(self.file_view)
+        layout2.addWidget(self.duplication_checker)
         self.files_space.setLayout(layout2)
+
+        layout3 = QVBoxLayout()
+        layout3.addWidget(self.file_organizer)
+        self.organazing_space.setLayout(layout3)
 
     def evt_dir_selected(self, selected_dir: str) -> None:
         if os.path.isdir(selected_dir):
             message = f'Selected directory {selected_dir}.'
             self.statusBar().showMessage(message, self._interval)
-            self.file_view.selected_path = selected_dir
+            self.duplication_checker.selected_path = selected_dir
+            self.file_organizer.selected_path = selected_dir
         elif os.path.isfile(selected_dir):
             message = f'Selected file {selected_dir}.'
             self.statusBar().showMessage(message, self._interval)

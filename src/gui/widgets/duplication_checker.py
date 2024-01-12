@@ -18,7 +18,7 @@ class DuplicationChecker(QtWidgets.QWidget):
 
     def __init__(self, parent):
         super(DuplicationChecker, self).__init__(parent)
-        uic.loadUi(path.dirname(__file__) + '/py_ui/files_view.ui', self)
+        uic.loadUi(path.dirname(__file__) + '/py_ui/duplication_checker_ui.ui', self)
         self._selected_path: str = ""
         self.files_hash: dict = {}
         self.duplications: dict = {}

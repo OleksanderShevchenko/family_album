@@ -6,22 +6,6 @@ __license__ = """<SOME LICENSE TEXT HERE>"""
 import sys
 import time
 
-from PyQt5.QtWidgets import QApplication
-
-from src.gui.main_window import MainWindow
-
-#
-# import sys
-# import time
-#
-# from PyQt5.QtWidgets import QApplication
-#
-# from widgets.data_source import DataSource
-# from gui.main_window import MainWindow
-# from gui.plot_canvas import PlotCanvas
-
-# set name and current version of the tool
-
 
 tool_name = 'Family Album tool'
 tool_version = '0.0.1'

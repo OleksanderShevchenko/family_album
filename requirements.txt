@@ -31,6 +31,7 @@ nox==2022.11.21
 numpy==1.26.3
 opencv-python>=4.9
 packaging==23.2
+pandas>=2.0
 parso==0.8.3
 pathspec==0.12.1
 pefile==2023.2.7

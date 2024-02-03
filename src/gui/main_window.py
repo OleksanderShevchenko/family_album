@@ -40,6 +40,10 @@ class MainWindow(QMainWindow):
         layout3.addWidget(self.file_organizer)
         self.organazing_space.setLayout(layout3)
 
+        self.main_splitter.setStretchFactor(0, 33)
+        self.main_splitter.setStretchFactor(1, 67)
+
+
     def evt_dir_selected(self, selected_dir: str) -> None:
         if os.path.isdir(selected_dir):
             message = f'Selected directory {selected_dir}.'

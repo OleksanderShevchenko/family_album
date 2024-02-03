@@ -19,6 +19,7 @@ class DirectoryView(QtWidgets.QWidget):
         self.directory_tree.setModel(self.dir_model)
         self.directory_tree.setRootIndex(self.indexRoot)
         self.directory_tree.clicked.connect(self.on_treeView_clicked)
+        self.directory_tree.setColumnWidth(0, 200)
 
     @QtCore.pyqtSlot(QtCore.QModelIndex)
     def on_treeView_clicked(self, index):

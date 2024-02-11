@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import QFileSystemModel, QTreeView, QVBoxLayout, QHBoxLayou
 
 from src.utility_functions.find_duplicate_files_async import find_duplicate_files_async
 from src.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
-from src.utility_functions.is_file_image_pil import is_file_a_picture
+from src.utility_functions.image_utils import is_file_a_picture
 
 
 class DuplicationChecker(QtWidgets.QWidget):

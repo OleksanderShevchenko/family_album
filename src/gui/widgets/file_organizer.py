@@ -3,6 +3,7 @@ import sys
 from os import path
 from PyQt5 import QtWidgets, uic
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtGui import QStandardItemModel
 from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox
 
 from src.utility_functions.database_manager import DatabaseManager
@@ -45,6 +46,7 @@ class FileOrganizer(QtWidgets.QWidget):
             self.pb_analyze.setEnabled(False)
             self.pb_organize.setEnabled(False)
         self.lbl_info.setText("<>")
+        self.tbl_file_data.setModel(QStandardItemModel())
 
     def evt_organize_files(self):
         try:
@@ -58,7 +60,7 @@ class FileOrganizer(QtWidgets.QWidget):
             self.pb_organize.setEnabled(True)
 
     def __show_message(self, message: str) -> None:
-        msg = QMessageBox()
+        msg = QMessageBox(self)
         msg.setWindowTitle("Duplication analysis")
         msg.setText(message)
         msg.setIcon(QMessageBox.Warning)
@@ -77,6 +79,8 @@ class FileOrganizer(QtWidgets.QWidget):
         working_dir = os.path.abspath(os.getcwd())
         database_path = os.path.join(working_dir, *os.path.split(self._DB_FOLDER))
         database_file = os.path.join(database_path, self._DB_FILE)
+        if not os.path.isdir(database_path):
+            os.mkdir(database_path)
         self.__db_settings = DatabaseSettings(
             database_type="sqlite",
             host="",
@@ -87,7 +91,6 @@ class FileOrganizer(QtWidgets.QWidget):
         )
         self.database: DatabaseManager = DatabaseManager(self.__db_settings)
         self.database.connect()
-
 
 
 if __name__ == "__main__":

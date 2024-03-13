@@ -45,7 +45,7 @@ def _is_image_cv2(file_name: str) -> bool:
         return False
 
 
-def get_image_capture_date(file_name: str) -> Optional[datetime]:
+def __get_image_capture_date(file_name: str) -> Optional[datetime]:
     """
     This function try to get image's take date by using metadata EXIF.
 
@@ -61,6 +61,24 @@ def get_image_capture_date(file_name: str) -> Optional[datetime]:
         return None
 
 
+def _get_image_info_pil(file_name: str) -> Image.Exif:
+    if not os.path.isfile(file_name):
+        return None
+
+    with Image.open(file_name) as image:
+        return image.getexif()
+
+
+def _get_image_info(file_name: str) -> dict:
+    if not os.path.isfile(file_name):
+        return None
+    try:
+        with open(file_name, 'rb') as f:
+            return exifread.process_file(f)
+    except Exception:
+        return None
+
+
 def get_image_creation_date(file_name: str) -> Optional[datetime]:
     """
     This function try to get image's creation date by using pillow lib
@@ -72,9 +90,9 @@ def get_image_creation_date(file_name: str) -> Optional[datetime]:
         return None
 
     with Image.open(file_name) as image:
-        exif = image._getexif()
+        exif = image.getexif()
+        creation_date = []
         if exif:
-            creation_date = []
             if 306 in exif.keys():  # The date and time of image creation
                 creation_date.append(datetime.strptime(exif[306], '%Y:%m:%d %H:%M:%S'))
             if 36867 in exif.keys():  # DateTimeOriginal
@@ -83,8 +101,11 @@ def get_image_creation_date(file_name: str) -> Optional[datetime]:
                 creation_date.append(datetime.strptime(exif[36868], '%Y:%m:%d %H:%M:%S'))
             if 50971 in exif.keys():  # PreviewDateTime
                 creation_date.append(datetime.strptime(exif[50971], '%Y:%m:%d %H:%M:%S'))
-            if len(creation_date) > 0:
-                return min(creation_date)
+        capture_date = __get_image_capture_date(file_name)
+        if isinstance(capture_date, datetime):
+            creation_date.append(capture_date)
+        if len(creation_date) > 0:
+            return min(creation_date)
         return None
 
 
@@ -111,24 +132,11 @@ def get_image_gps_coordinates(file_name: str) -> Optional[tuple]:
    """
     try:
         with open(file_name, 'rb') as f:
-            tags = exifread.process_file(f, stop_tag='GPSLongitude')
-            if all(key in tags for key in ['GPSLatitude', 'GPSLongitude']):
-                lat_ref = str(tags['GPSLatitudeRef'])
-                lat = str(tags['GPSLatitude'])
-                lon_ref = str(tags['GPSLongitudeRef'])
-                lon = str(tags['GPSLongitude'])
-                lat_parts = lat.split('/')
-                lat_float = float(lat_parts[0]) / float(lat_parts[1])
-                lon_parts = lon.split('/')
-                lon_float = float(lon_parts[0]) / float(lon_parts[1])
-                if lat_ref == 'S':
-                    lat_float = -lat_float
-                if lon_ref == 'W':
-                    lon_float = -lon_float
-                return (lat_float, lon_float)
-        return None
+            tags = exifread.process_file(f)
+
+        return None, None
     except Exception:
-        return None
+        return None, None
 
 
 def get_image_maker(file_name: str) -> Optional[str]:
@@ -145,6 +153,20 @@ def get_image_maker(file_name: str) -> Optional[str]:
             return str(make)
         else:
             return None
+
+
+def _get_region_from_coords(latitude: float, longitude: float) -> str:
+    geolocator = Nominatim(user_agent="my-application")
+    location = geolocator.reverse(f"{latitude}, {longitude}")
+    return location.raw['address']['state']
+
+
+def _get_region_from_coords(latitude: float, longitude: float) -> str:
+    url = f"https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={latitude}&lon={longitude}"
+    response = requests.get(url)
+    json_data = response.json()
+    return json_data['address']['country'] + ", " + json_data['address']['state'] + ", " + json_data['address']['town']
+
 
 def _imshow(title="Image", image=None, size=10):
     w, h = image.shape[0], image.shape[1]

@@ -2,10 +2,10 @@ import os.path
 import unittest
 from datetime import datetime
 
-from src.utility_functions.image_utils import (is_file_a_picture, get_image_size, get_image_creation_date)
+from src.utility_functions.image_utils import (is_image_file, get_image_size, get_image_creation_date)
 
 
-class TestDatabaseManager(unittest.TestCase):
+class TestImageUtils(unittest.TestCase):
     def setUp(self):
         self._data_path = os.path.abspath('./data/images/')
         self._image_sizes = {'test_photo.jpg': (1600, 720),
@@ -21,7 +21,7 @@ class TestDatabaseManager(unittest.TestCase):
         for dir_name, _, files in os.walk(self._data_path):
             for file in files:
                 full_name = os.path.join(dir_name, file)
-                self.assertTrue(is_file_a_picture(full_name))
+                self.assertTrue(is_image_file(full_name))
 
     def test_image_size(self):
         for dir_name, _, files in os.walk(self._data_path):

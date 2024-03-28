@@ -61,22 +61,35 @@ def __get_image_capture_date(file_name: str) -> Optional[datetime]:
         return None
 
 
-def _get_image_info_pil(file_name: str) -> Image.Exif:
+def get_image_exif(file_name: str, combine: bool = False) -> dict:
+    result = {}
     if not os.path.isfile(file_name):
-        return None
+        return result
+    result = _get_image_info(file_name)
+    if result is not None:
+        if combine:
+            try:
+                exif_ = _get_image_info_pil(file_name)
+                result.update(exif_)
+            except Exception:
+                pass
+        return result
+    else:
+        return _get_image_info_pil(file_name)
 
+
+def _get_image_info_pil(file_name: str) -> dict:
     with Image.open(file_name) as image:
-        return image.getexif()
+        exif_ = image.getexif()
+        return {key: val for key, val in exif_.items()}
 
 
 def _get_image_info(file_name: str) -> dict:
-    if not os.path.isfile(file_name):
-        return None
     try:
         with open(file_name, 'rb') as f:
             return exifread.process_file(f)
     except Exception:
-        return None
+        return {}
 
 
 def get_image_creation_date(file_name: str) -> Optional[datetime]:

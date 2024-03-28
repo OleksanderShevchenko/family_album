@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import QFileSystemModel, QTreeView, QVBoxLayout, QHBoxLayou
 
 from src.utility_functions.find_duplicate_files_async import find_duplicate_files_async
 from src.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
-from src.utility_functions.image_utils import is_file_a_picture
+from src.utility_functions.image_utils import is_image_file
 
 
 class DuplicationChecker(QtWidgets.QWidget):
@@ -125,14 +125,14 @@ class DuplicationChecker(QtWidgets.QWidget):
         self.lst_duplications.setModel(QStringListModel(duplication_files))
         self.lst_duplications.selectionModel().currentChanged.connect(self.evt_duplicated_file_selected)
         self.lblDuplicatedImage.setText("<>")
-        if is_file_a_picture(selected_file):
+        if is_image_file(selected_file):
             self.__show_image(self.lblOriginalImage, selected_file, True)
         else:
             self.lblOriginalImage.setText("<>")
 
     def evt_duplicated_file_selected(self, current, previous) -> None:
         selected_file = current.data()
-        if is_file_a_picture(selected_file):
+        if is_image_file(selected_file):
             self.__show_image(self.lblDuplicatedImage, selected_file)
         else:
             self.lblDuplicatedImage.setText("<>")

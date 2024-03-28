@@ -11,7 +11,7 @@ import requests
 from typing import Tuple
 
 
-def is_file_a_picture(file_name: str) -> bool:
+def is_image_file(file_name: str) -> bool:
     """
     Check if passed file is image by means of pillow and python-opencv libs together
 

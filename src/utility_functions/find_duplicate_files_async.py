@@ -5,12 +5,12 @@ import os
 from time import perf_counter
 
 
-async def hash_file(path):
+async def hash_file(path) -> str:
     """
     Асинхронно обчислює хеш вмісту файлу за вказаним шляхом.
     """
     BLOCKSIZE = 65536
-    hasher = hashlib.md5()
+    hasher = hashlib.blake2b()
     with open(path, 'rb') as file:
         buf = file.read(BLOCKSIZE)
         while len(buf) > 0:
@@ -18,7 +18,7 @@ async def hash_file(path):
             buf = file.read(BLOCKSIZE)
     return hasher.hexdigest()
 
-async def find_duplicate_files_async(root_folder):
+async def find_duplicate_files_async(root_folder) -> dict:
     """
     Асинхронна функція для пошуку дублікатів файлів в директорії та її піддиректоріях.
     Повертає словник, де ключ - це оригінальний файл, а значеннями - список файлів, які його дублюють.

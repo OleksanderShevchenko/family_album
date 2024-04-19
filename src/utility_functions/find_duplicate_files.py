@@ -15,7 +15,7 @@ def find_duplicate_files(directory):
             # Обчислюємо хеш файлу
             path = os.path.join(root, filename)
             with open(path, 'rb') as file:
-                filehash = hashlib.md5(file.read()).hexdigest()
+                filehash = hashlib.blake2b(file.read()).hexdigest()
 
             # Додаємо хеш та шлях до словника hashes
             if filehash in hashes:

@@ -29,7 +29,7 @@ def get_video_metadata(file_name: str) -> dict:
     try:
         cap = cv2.VideoCapture(file_name)
         output['resolution'] = [cap.get(cv2.CAP_PROP_FRAME_WIDTH), cap.get(cv2.CAP_PROP_FRAME_HEIGHT)]
-        output['bitrate'] = cap.get(cv2.CAP_PROP_FPS)
+        output['bitrate'] = int(cap.get(cv2.CAP_PROP_FPS))
         output['codec'] = cap.get(cv2.CAP_PROP_FOURCC)
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         output['duration'] = frame_count / output['bitrate']

@@ -48,11 +48,15 @@ def analyze_directory(directory: str) -> pd.DataFrame:
                 row_data["video_bitrate"] = 0
                 row_data["video_duration"] = 0
                 row_data["video_codec"] = ''
-            output = _fill_dataframe_row(output, row_data)
+            temp_output = _fill_dataframe_row(output, row_data)
+            if temp_output is not None:
+                output = temp_output
+            else:
+                print(f'File {full_file_name} was skipped in analyses due to error!')
     return output
 
 
-def _create_empty_dataframe(columns_dict):
+def _create_empty_dataframe(columns_dict: dict) -> pd.DataFrame:
     """
     Create an empty pandas DataFrame with specified columns.
     Parameters:
@@ -68,7 +72,7 @@ def _create_empty_dataframe(columns_dict):
     return df
 
 
-def _fill_dataframe_row(df: pd.DataFrame, row_data: dict) -> pd.DataFrame|None:
+def _fill_dataframe_row(df: pd.DataFrame, row_data: dict) -> pd.DataFrame | None:
     """
     Fill a DataFrame with row data if column names and data types match.
     Parameters:
@@ -81,8 +85,12 @@ def _fill_dataframe_row(df: pd.DataFrame, row_data: dict) -> pd.DataFrame|None:
     if not set(row_data.keys()) == set(df.columns):
         print("Column names in row_data do not match DataFrame columns.")
         return None
-    # Inserting the new row
-    df.loc[len(df)] = row_data
-    # Reset the index
-    df = df.reset_index(drop=True)
-    return df
+    try:
+        # Inserting the new row
+        df.loc[len(df)] = row_data
+        # Reset the index
+        df = df.reset_index(drop=True)
+        return df
+    except Exception as err:
+        print(f'Error occur: {err}')
+        return None

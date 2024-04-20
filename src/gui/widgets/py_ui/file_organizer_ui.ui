@@ -85,7 +85,7 @@
             <string>Search for duplicate files by comparing file's hash between all files in selected folder and its subfolders</string>
            </property>
            <property name="text">
-            <string>Check for duplicate</string>
+            <string>Organize files...</string>
            </property>
           </widget>
          </item>

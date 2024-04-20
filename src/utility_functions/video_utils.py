@@ -18,7 +18,7 @@ def is_file_a_video(file_name: str) -> bool:
         return False
 
 
-def _get_video_metadata(file_name: str) -> dict:
+def get_video_metadata(file_name: str) -> dict:
     """
      This function try to get video metadata by means of python-opencv lib
 
@@ -28,8 +28,11 @@ def _get_video_metadata(file_name: str) -> dict:
     output = {}
     try:
         cap = cv2.VideoCapture(file_name)
-        output['resolution'] = [cap.get(3), cap.get(4)]
-        output['bitrate'] = cap.get(5)
+        output['resolution'] = [cap.get(cv2.CAP_PROP_FRAME_WIDTH), cap.get(cv2.CAP_PROP_FRAME_HEIGHT)]
+        output['bitrate'] = cap.get(cv2.CAP_PROP_FPS)
+        output['codec'] = cap.get(cv2.CAP_PROP_FOURCC)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        output['duration'] = frame_count / output['bitrate']
     except Exception:
         pass
     return output

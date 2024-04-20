@@ -5,7 +5,7 @@ import datetime
 from typing import Optional
 
 
-def get_file_creation_date(file_name: str) -> Optional[datetime]:
+def get_file_creation_date(file_name: str) -> Optional[datetime.datetime]:
     """
     The function returns date of the file creation
 

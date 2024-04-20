@@ -152,7 +152,7 @@ def get_image_gps_coordinates(file_name: str) -> Optional[tuple]:
         return None, None
 
 
-def get_image_maker(file_name: str) -> Optional[str]:
+def get_image_maker(file_name: str) -> str:
     """
     This function try to get image's geolocation by means of exifread lib
 
@@ -165,7 +165,7 @@ def get_image_maker(file_name: str) -> Optional[str]:
         if make:
             return str(make)
         else:
-            return None
+            return ""  # return empty string instead of None
 
 
 def _get_region_from_coords(latitude: float, longitude: float) -> str:

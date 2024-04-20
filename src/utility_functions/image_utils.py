@@ -9,7 +9,8 @@ from geopy.geocoders import Nominatim
 from matplotlib import pyplot as plt
 from PIL import Image
 import requests
-from typing import Tuple
+
+from pandas._libs.missing import NAType
 
 
 def is_image_file(file_name: str) -> bool:
@@ -93,7 +94,7 @@ def _get_image_info(file_name: str) -> dict:
         return {}
 
 
-def get_image_creation_date(file_name: str) -> datetime|pd.NaT:
+def get_image_creation_date(file_name: str) -> datetime|NAType:
     """
     This function try to get image's creation date by using pillow lib
 

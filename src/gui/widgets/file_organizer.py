@@ -6,8 +6,11 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtGui import QStandardItemModel
 from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox
 
+from src.gui.dataframe_model import DataFrameModel
+from src.utility_functions.analyze_directory import analyze_directory
 from src.utility_functions.database_manager import DatabaseManager
 from src.utility_functions.database_settings import DatabaseSettings
+from src.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
 
 
 class FileOrganizer(QtWidgets.QWidget):
@@ -26,6 +29,8 @@ class FileOrganizer(QtWidgets.QWidget):
         self.pb_organize.clicked.connect(self.evt_organize_files)
         self.pb_analyze.setEnabled(False)
         self.pb_organize.setEnabled(False)
+        self.tbl_file_data.setSortingEnabled(True)
+        self.tbl_file_data.horizontalHeader().setSectionsMovable(True)
         self.__connect_to_database()
 
     @property
@@ -61,14 +66,21 @@ class FileOrganizer(QtWidgets.QWidget):
 
     def __show_message(self, message: str) -> None:
         msg = QMessageBox(self)
-        msg.setWindowTitle("Duplication analysis")
+        msg.setWindowTitle("Files organizer")
         msg.setText(message)
         msg.setIcon(QMessageBox.Warning)
         msg.exec_()
 
     def evt_analyze_selected(self):
         try:
-           ...
+            if os.path.isdir(self._selected_path):
+                self.pb_analyze.setEnabled(False)
+                file_count, dir_count = get_files_and_subdirs_count(self._selected_path)
+                message = f'Selected directory totally has got {file_count} files and {dir_count} sub-directories'
+                self.lbl_info.setText(message)
+                data_frame = analyze_directory(self._selected_path)
+                df_model = DataFrameModel(data_frame)
+                self.tbl_file_data.setModel(df_model)
         except Exception as err:
             print(f"Error occur: {err}")
             self.__show_message(f"Error occur: {err}")

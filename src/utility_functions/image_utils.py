@@ -4,6 +4,7 @@ from typing import Optional
 
 import cv2
 import exifread
+import pandas as pd
 from geopy.geocoders import Nominatim
 from matplotlib import pyplot as plt
 from PIL import Image
@@ -92,7 +93,7 @@ def _get_image_info(file_name: str) -> dict:
         return {}
 
 
-def get_image_creation_date(file_name: str) -> Optional[datetime]:
+def get_image_creation_date(file_name: str) -> datetime|pd.NaT:
     """
     This function try to get image's creation date by using pillow lib
 
@@ -119,7 +120,7 @@ def get_image_creation_date(file_name: str) -> Optional[datetime]:
             creation_date.append(capture_date)
         if len(creation_date) > 0:
             return min(creation_date)
-        return None
+        return pd.NaT
 
 
 def get_image_size(file_path: str) -> Optional[tuple[int, int]]:

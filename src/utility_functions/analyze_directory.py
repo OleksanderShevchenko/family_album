@@ -46,10 +46,14 @@ def analyze_directory(directory: str) -> pd.DataFrame:
             if is_video:
                 meta_data = get_video_metadata(full_file_name)
                 if meta_data:
-                    row_data["video_resolution"] = f'{meta_data["resolution"][0]}x{meta_data["resolution"][1]}'
-                    row_data["video_bitrate"] = meta_data['bitrate']
-                    row_data["video_duration"] = meta_data['duration']
-                    row_data["video_codec"] = meta_data['codec']
+                    if "resolution" in meta_data.keys():
+                        row_data["video_resolution"] = f'{meta_data["resolution"][0]}x{meta_data["resolution"][1]}'
+                    if "bitrate" in meta_data.keys():
+                        row_data["video_bitrate"] = meta_data['bitrate']
+                    if "duration" in meta_data.keys():
+                        row_data["video_duration"] = meta_data['duration']
+                    if "codec" in meta_data.keys():
+                        row_data["video_codec"] = meta_data['codec']
 
             temp_output = _fill_dataframe_row(output, row_data)
             if temp_output is not None:

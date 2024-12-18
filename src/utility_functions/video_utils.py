@@ -1,5 +1,5 @@
 import cv2
-from is_file_video import is_file_a_video
+from src.utility_functions.is_file_video import is_file_a_video
 
 
 def get_video_metadata(file_name: str) -> dict:

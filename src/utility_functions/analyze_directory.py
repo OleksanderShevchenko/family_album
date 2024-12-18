@@ -37,17 +37,20 @@ def analyze_directory(directory: str) -> pd.DataFrame:
                 row_data["image_size"] = ''
                 row_data["image_date_take"] = pd.NaT
                 row_data["image_maker"] = ""
+
+            row_data["video_resolution"] = ''
+            row_data["video_bitrate"] = 0
+            row_data["video_duration"] = 0
+            row_data["video_codec"] = ''
+
             if is_video:
                 meta_data = get_video_metadata(full_file_name)
-                row_data["video_resolution"] = f'{meta_data["resolution"][0]}x{meta_data["resolution"][1]}'
-                row_data["video_bitrate"] = meta_data['bitrate']
-                row_data["video_duration"] = meta_data['duration']
-                row_data["video_codec"] = meta_data['codec']
-            else:
-                row_data["video_resolution"] = ''
-                row_data["video_bitrate"] = 0
-                row_data["video_duration"] = 0
-                row_data["video_codec"] = ''
+                if meta_data:
+                    row_data["video_resolution"] = f'{meta_data["resolution"][0]}x{meta_data["resolution"][1]}'
+                    row_data["video_bitrate"] = meta_data['bitrate']
+                    row_data["video_duration"] = meta_data['duration']
+                    row_data["video_codec"] = meta_data['codec']
+
             temp_output = _fill_dataframe_row(output, row_data)
             if temp_output is not None:
                 output = temp_output

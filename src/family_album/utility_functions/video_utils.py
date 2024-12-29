@@ -1,7 +1,12 @@
+from datetime import datetime
 import os.path
 
 import cv2
 from moviepy.video.io.VideoFileClip import VideoFileClip, AudioFileClip
+import pandas as pd
+from pandas._libs.missing import NAType
+
+from src.family_album.utility_functions.file_utils import get_file_creation_date
 
 
 def is_file_a_video(file_name):
@@ -48,6 +53,36 @@ def get_video_metadata(file_name: str) -> dict:
             output.update(_get_video_meta_data_from_cv2(file_name))
         except Exception:
             pass
+    return output
+
+
+def get_video_creation_date(file_name: str) -> datetime|NAType:
+    """
+    This function try to get image's creation date by using pillow lib
+
+    :param file_name: full (absolute) name of the file.
+    :return: datetime value is success or None otherwise
+    """
+    output = pd.NaT
+    if not os.path.isfile(file_name):
+        return output
+
+    metadata = get_video_metadata(file_name)
+    if metadata and 'infos' in metadata.keys():
+        infos = metadata['infos']
+        if infos and 'metadata' in infos.keys():
+            meta_data = infos['metadata']
+            if meta_data and 'creation_time' in meta_data.keys():
+                date_time_str = meta_data['creation_time']
+                try:
+                    output = datetime.strptime(date_time_str, '%Y:%m:%d %H:%M:%S')
+                except ValueError:
+                    try:
+                        output = datetime.strptime(date_time_str, '%Y-%m-%d  %H:%M:%S')
+                    except ValueError:
+                        output = pd.NaT
+    if output is pd.NaT:
+        output = get_file_creation_date(file_name)
     return output
 
 

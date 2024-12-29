@@ -4,13 +4,13 @@ import os.path
 import shutil
 import sys
 from os import path
-from PyQt5 import QtWidgets, uic, QtCore, QtGui
-from PyQt5.QtCore import QDir, pyqtSignal, QStringListModel, Qt
-from PyQt5.QtWidgets import QFileSystemModel, QTreeView, QVBoxLayout, QHBoxLayout, QDialog, QMessageBox, QLabel
+from PyQt5 import QtWidgets, uic, QtGui
+from PyQt5.QtCore import pyqtSignal, QStringListModel, Qt
+from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel
 
-from src.utility_functions.find_duplicate_files_async import find_duplicate_files_async
-from src.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
-from src.utility_functions.image_utils import is_image_file
+from src.family_album.utility_functions.find_duplicate_files_async import find_duplicate_files_async
+from src.family_album.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
+from src.family_album.utility_functions.image_utils import is_image_file
 
 
 class DuplicationChecker(QtWidgets.QWidget):

@@ -6,7 +6,7 @@ __license__ = """<SOME LICENSE TEXT HERE>"""
 import sys
 import time
 
-from src.gui.application import create_app, show_splash, run
+from src.family_album.gui.application import create_app, show_splash, run
 
 
 tool_name = 'Family Album tool'

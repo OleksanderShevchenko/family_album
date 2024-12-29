@@ -1,6 +1,6 @@
 from PyQt5.QtSql import QSqlDatabase, QSqlQuery, QSqlTableModel
 
-from src.utility_functions.database_settings import DatabaseSettings
+from src.family_album.utility_functions.database_settings import DatabaseSettings
 
 
 class DatabaseManager:

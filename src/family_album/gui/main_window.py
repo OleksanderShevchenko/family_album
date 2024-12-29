@@ -8,9 +8,9 @@ from PyQt5 import uic
 from PyQt5.QtWidgets import QMainWindow, QVBoxLayout
 
 # from .plot_canvas import PlotCanvas
-from src.gui.widgets.directory_view import DirectoryView
-from src.gui.widgets.duplication_checker import DuplicationChecker
-from src.gui.widgets.file_organizer import FileOrganizer
+from src.family_album.gui.widgets.directory_view import DirectoryView
+from src.family_album.gui.widgets.duplication_checker import DuplicationChecker
+from src.family_album.gui.widgets.file_organizer import FileOrganizer
 
 
 class MainWindow(QMainWindow):

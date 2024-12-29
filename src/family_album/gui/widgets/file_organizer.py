@@ -6,11 +6,11 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtGui import QStandardItemModel
 from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox
 
-from src.gui.dataframe_model import DataFrameModel
-from src.utility_functions.analyze_directory import analyze_directory
-from src.utility_functions.database_manager import DatabaseManager
-from src.utility_functions.database_settings import DatabaseSettings
-from src.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
+from src.family_album.gui.dataframe_model import DataFrameModel
+from src.family_album.utility_functions.analyze_directory import analyze_directory
+from src.family_album.utility_functions.database_manager import DatabaseManager
+from src.family_album.utility_functions.database_settings import DatabaseSettings
+from src.family_album.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
 
 
 class FileOrganizer(QtWidgets.QWidget):

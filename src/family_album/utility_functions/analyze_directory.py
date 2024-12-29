@@ -2,9 +2,9 @@ import os
 
 import pandas as pd
 
-from src.utility_functions.file_utils import get_file_size, get_file_creation_date
-from src.utility_functions.image_utils import is_image_file, get_image_creation_date, get_image_size, get_image_maker
-from src.utility_functions.video_utils import is_file_a_video, get_video_metadata
+from src.family_album.utility_functions.file_utils import get_file_size, get_file_creation_date
+from src.family_album.utility_functions.image_utils import is_image_file, get_image_creation_date, get_image_size, get_image_maker
+from src.family_album.utility_functions.video_utils import is_file_a_video, get_video_metadata
 
 _TEMPLATE = {"file_name": "str", "file_path": "str", "file_date_created": "datetime64[s]",
              "image_date_take": "datetime64[s]", "file_size": "int64", "is_image": "bool", "is_video": "bool",

@@ -1,11 +1,10 @@
 import unittest
 
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
 from PyQt5.QtSql import QSqlQueryModel, QSqlDatabase
 
-from src.utility_functions.database_manager import DatabaseManager
-from src.utility_functions.database_settings import DatabaseSettings
+from src.family_album.utility_functions.database_manager import DatabaseManager
+from src.family_album.utility_functions.database_settings import DatabaseSettings
 
 
 class TestDatabaseManager(unittest.TestCase):

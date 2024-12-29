@@ -31,7 +31,7 @@ def run(name, version):
     global _splash
     if _app is None:
         raise Exception('Call create_app first')
-    from src.gui.main_window import MainWindow as Main_Window
+    from src.family_album.gui.main_window import MainWindow as Main_Window
     # Create QT application
     QtWidgets.QApplication.setStyle(QtWidgets.QStyleFactory.create('Fusion'))
     QtWidgets.QApplication.setWindowIcon(QtGui.QIcon(_image_path + '/icon.png'))

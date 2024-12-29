@@ -6,7 +6,8 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 
 def is_file_a_video(file_name):
     # list of supporting file extensions
-    video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.mpeg', '.mpg', '.3gp', '.3g2', '.webm']
+    video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.mpeg', '.mpg', '.3gp', '.3g2', '.webm',
+                        '.mts']
 
     # check extension
     if file_name.lower().endswith(tuple(video_extensions)):

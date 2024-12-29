@@ -1,7 +1,7 @@
 import os.path
 
 import cv2
-from moviepy.video.io.VideoFileClip import VideoFileClip
+from moviepy.video.io.VideoFileClip import VideoFileClip, AudioFileClip
 
 
 def is_file_a_video(file_name):
@@ -42,14 +42,45 @@ def get_video_metadata(file_name: str) -> dict:
      """
     output = {}
     try:
-        cap = cv2.VideoCapture(file_name)
-        output['resolution'] = [cap.get(cv2.CAP_PROP_FRAME_WIDTH), cap.get(cv2.CAP_PROP_FRAME_HEIGHT)]
-        output['bitrate'] = int(cap.get(cv2.CAP_PROP_FPS))
-        output['codec'] = cap.get(cv2.CAP_PROP_FOURCC)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        output['duration'] = frame_count / output['bitrate']
+        output.update(_get_video_meta_data_from_moviepy(file_name))
     except Exception:
-        pass
+        try:
+            output.update(_get_video_meta_data_from_cv2(file_name))
+        except Exception:
+            pass
+    return output
+
+
+def _get_video_meta_data_from_cv2(file_name: str) -> dict:
+    output = {}
+    if is_file_a_video(file_name):
+            cap = cv2.VideoCapture(file_name)
+            output['resolution'] = [cap.get(cv2.CAP_PROP_FRAME_WIDTH), cap.get(cv2.CAP_PROP_FRAME_HEIGHT)]
+            output['bitrate'] = int(cap.get(cv2.CAP_PROP_FPS))
+            output['codec'] = cap.get(cv2.CAP_PROP_FOURCC)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            output['n_frames'] = frame_count
+            output['duration'] = frame_count / output['bitrate']
+    return output
+
+
+def _get_video_meta_data_from_moviepy(file_name: str) -> dict:
+    output = {}
+    if is_file_a_video(file_name):
+        clip = VideoFileClip(file_name)
+        output['resolution'] = [clip.w, clip.h]
+        output['bitrate'] = int(clip.fps)
+        output['duration'] = float(clip.duration)
+        output['aspect_ratio'] = clip.aspect_ratio
+        output['n_frames_moviepy'] = int(clip.n_frames)
+        output['infos'] = clip.reader.infos
+        audio: AudioFileClip = clip.audio
+        if audio is not None:
+            output['audio_duration'] = f"{audio.duration}"
+            output['audio_bitrate'] = f"{audio.reader.bitrate}"
+            output['audio_codec'] = f"{audio.reader.codec}"
+        else:
+            output['audio_moviepy'] = "No audio"
     return output
 
 
@@ -77,16 +108,3 @@ def _open_video(file_name: str) -> None:
     cap.release()
     cv2.destroyAllWindows()
 
-
-if __name__ == "__main__":
-    video_file = "C:\\Users\\Oleksander\\Videos\\20240407_120610A.MP4"
-    image_file = "C:\\Users\\Oleksander\\Alex\\Projects\\family_album\\tests\\data\\images\\test_photo3.jpg"
-    if os.path.exists(video_file):
-        print(f'file {video_file} is video file = {is_file_a_video(video_file)}')
-    else:
-        print(f"File {video_file} does not exist!")
-
-    if os.path.exists(image_file):
-        print(f'file {image_file} is video file = {is_file_a_video(image_file)}')
-    else:
-        print(f"File {image_file} does not exist!")

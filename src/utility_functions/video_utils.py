@@ -1,21 +1,5 @@
 import cv2
-
-
-def is_file_a_video(file_name: str) -> bool:
-    """
-     This function checks if passed file is video file by means of python-opencv lib
-
-     :param file_name: full (absolute) name of the file.
-     :return: boolean flag - true if the file may assume as image, ot False otherwise.
-     """
-    try:
-        cap = cv2.VideoCapture(file_name)
-        if not cap.isOpened():
-            return False
-        else:
-            return True
-    except Exception:
-        return False
+from src.utility_functions.is_file_video import is_file_a_video
 
 
 def get_video_metadata(file_name: str) -> dict:

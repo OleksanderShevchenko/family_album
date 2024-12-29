@@ -3,13 +3,15 @@ import os
 import pandas as pd
 
 from src.family_album.utility_functions.file_utils import get_file_size, get_file_creation_date
-from src.family_album.utility_functions.image_utils import is_image_file, get_image_creation_date, get_image_size, get_image_maker
-from src.family_album.utility_functions.video_utils import is_file_a_video, get_video_metadata
+from src.family_album.utility_functions.image_utils import (is_image_file, get_image_creation_date, get_image_size,
+                                                            get_image_maker)
+from src.family_album.utility_functions.video_utils import is_file_a_video, get_video_metadata, get_video_creation_date
+
 
 _TEMPLATE = {"file_name": "str", "file_path": "str", "file_date_created": "datetime64[s]",
-             "image_date_take": "datetime64[s]", "file_size": "int64", "is_image": "bool", "is_video": "bool",
-             "image_size": "str", "image_maker": "str", "video_resolution": "str", "video_bitrate": "int64",
-             "video_duration": "int64", "video_codec": "str"}
+             "date_take": "datetime64[s]", "file_size": "int64", "is_image": "bool", "is_video": "bool",
+             "resolution": "str", "maker": "str", "video_bitrate": "int64",
+             "video_duration": "int64"}
 
 
 def analyze_directory(directory: str) -> pd.DataFrame:
@@ -21,39 +23,37 @@ def analyze_directory(directory: str) -> pd.DataFrame:
         for filename in files:
             full_file_name = os.path.join(root, filename)
             row_data = {"file_name": filename, "file_path": full_file_name, "file_size": get_file_size(full_file_name),
-                        "file_date_created": get_file_creation_date(full_file_name)}
-            is_image = is_image_file(full_file_name)
-            row_data["is_image"] = is_image
+                        "file_date_created": get_file_creation_date(full_file_name), "video_bitrate": 0,
+                        "video_duration": 0}
             is_video = is_file_a_video(full_file_name)
             row_data["is_video"] = is_video
-            if is_image:
-                image_date_taken = get_image_creation_date(full_file_name)
-                image_size = get_image_size(full_file_name)
-                image_maker = get_image_maker(full_file_name)
-                row_data["image_size"] = f'{image_size[0]}x{image_size[1]}'
-                row_data["image_date_take"] = image_date_taken
-                row_data["image_maker"] = image_maker
+            if is_video:  # avoid is_video = True and is_image = True (for gif)
+                is_image = False
             else:
-                row_data["image_size"] = ''
-                row_data["image_date_take"] = pd.NaT
-                row_data["image_maker"] = ""
-
-            row_data["video_resolution"] = ''
-            row_data["video_bitrate"] = 0
-            row_data["video_duration"] = 0
-            row_data["video_codec"] = ''
-
+                is_image = is_image_file(full_file_name)
+            row_data["is_image"] = is_image
             if is_video:
+                date_taken = get_video_creation_date(full_file_name)
                 meta_data = get_video_metadata(full_file_name)
+                maker = "Unknown"
+
+                row_data["date_take"] = date_taken
+                row_data["maker"] = maker
                 if meta_data:
-                    if "resolution" in meta_data.keys():
-                        row_data["video_resolution"] = f'{meta_data["resolution"][0]}x{meta_data["resolution"][1]}'
-                    if "bitrate" in meta_data.keys():
-                        row_data["video_bitrate"] = meta_data['bitrate']
-                    if "duration" in meta_data.keys():
-                        row_data["video_duration"] = meta_data['duration']
-                    if "codec" in meta_data.keys():
-                        row_data["video_codec"] = meta_data['codec']
+                    row_data["resolution"] = f'{meta_data["resolution"]}'
+                    row_data["video_bitrate"] = meta_data['bitrate']
+                    row_data["video_duration"] = meta_data['duration']
+            elif is_image:
+                date_taken = get_image_creation_date(full_file_name)
+                image_size = get_image_size(full_file_name)
+                maker = get_image_maker(full_file_name)
+                row_data["resolution"] = f'{image_size[0]}x{image_size[1]}'
+                row_data["date_take"] = date_taken
+                row_data["maker"] = maker
+            else:
+                row_data["resolution"] = ''
+                row_data["date_take"] = get_file_creation_date(full_file_name)
+                row_data["maker"] = ""
 
             temp_output = _fill_dataframe_row(output, row_data)
             if temp_output is not None:

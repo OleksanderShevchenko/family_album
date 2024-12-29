@@ -7,10 +7,11 @@ import exifread
 import pandas as pd
 from geopy.geocoders import Nominatim
 from matplotlib import pyplot as plt
+from pandas._libs.missing import NAType
 from PIL import Image
 import requests
 
-from pandas._libs.missing import NAType
+from src.family_album.utility_functions.file_utils import get_file_creation_date
 
 
 def is_image_file(file_name: str) -> bool:
@@ -101,8 +102,9 @@ def get_image_creation_date(file_name: str) -> datetime|NAType:
     :param file_name: full (absolute) name of the file.
     :return: datetime value is success or None otherwise
     """
+    output = pd.NaT
     if not os.path.isfile(file_name):
-        return pd.NaT
+        return output
 
     with Image.open(file_name) as image:
         exif = image.getexif()
@@ -120,8 +122,10 @@ def get_image_creation_date(file_name: str) -> datetime|NAType:
         if isinstance(capture_date, datetime):
             creation_date.append(capture_date)
         if len(creation_date) > 0:
-            return min(creation_date)
-        return pd.NaT
+            output = min(creation_date)
+        if output is pd.NaT:
+            output = get_file_creation_date(file_name)
+        return output
 
 
 def get_image_size(file_path: str) -> Optional[tuple[int, int]]:

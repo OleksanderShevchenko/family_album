@@ -15,8 +15,10 @@ class TestImageUtils(unittest.TestCase):
                              'test_photo3.jpg': (4000, 1800),
                              'test_photo4.jpg': (4000, 1800),
                              'test.jpg': (400, 300)}
-        self._image_take_date = {'test_photo.jpg': pd.NaT,
-                                 'test_photo2.jpg': pd.NaT,
+        self._image_take_date = {'test_photo.jpg': datetime(year=2024, month=6, day=10, hour=16, minute=57, second=53,
+                                                            microsecond=630545),
+                                 'test_photo2.jpg': datetime(year=2024, month=6, day=10, hour=16, minute=57, second=53,
+                                                             microsecond=631591),
                                  'test_photo3.jpg': datetime(year=2024, month=2, day=23, hour=11, minute=24, second=48),
                                  'test_photo4.jpg': datetime(year=2024, month=2, day=20, hour=11, minute=42, second=58),
                                  'test.jpg': datetime(year=2010, month=1, day=1, hour=0, minute=00, second=00)}

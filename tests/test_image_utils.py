@@ -46,7 +46,6 @@ class TestImageUtils(unittest.TestCase):
                 else:
                     self.assertEqual(expected_date, take_date)
 
-
     def test_image_exif_data(self):
         for dir_name, _, files in os.walk(self._data_path):
             for file in files:

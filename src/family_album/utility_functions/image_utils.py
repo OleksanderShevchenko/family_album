@@ -102,7 +102,7 @@ def get_image_creation_date(file_name: str) -> datetime|NAType:
     :return: datetime value is success or None otherwise
     """
     if not os.path.isfile(file_name):
-        return None
+        return pd.NaT
 
     with Image.open(file_name) as image:
         exif = image.getexif()

@@ -6,10 +6,11 @@ __license__ = """<SOME LICENSE TEXT HERE>"""
 import sys
 import time
 
+from src.gui.application import create_app, show_splash, run
+
 
 tool_name = 'Family Album tool'
 tool_version = '0.0.1'
-from src.gui.application import create_app, show_splash, run
 
 
 def trap_exc_during_debug(*args):

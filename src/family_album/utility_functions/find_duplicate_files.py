@@ -4,36 +4,36 @@ import hashlib
 from time import perf_counter
 
 
-def find_duplicate_files(directory):
-    # Створюємо порожні словники для зберігання хешів та дублікатів
-    hashes = {}
-    duplicates = {}
+def find_duplicate_files(directory: str) -> dict:
+    # create empty dicts for hash and for duplicates
+    file_hashes = {}
+    duplicate_files = {}
 
-    # Ітеруємося по всіх файлах та папках в директорії
+    # iterate though all files and subdirectories
     for root, dirs, files in os.walk(directory):
         for filename in files:
-            # Обчислюємо хеш файлу
-            path = os.path.join(root, filename)
-            with open(path, 'rb') as file:
+            # calculate file hash
+            full_file_name = os.path.join(root, filename)
+            with open(full_file_name, 'rb') as file:
                 filehash = hashlib.blake2b(file.read()).hexdigest()
 
-            # Додаємо хеш та шлях до словника hashes
-            if filehash in hashes:
-                hashes[filehash].append(path)
+            # add hash and file name to dictionary
+            if filehash in file_hashes:
+                file_hashes[filehash].append(full_file_name)
             else:
-                hashes[filehash] = [path]
+                file_hashes[filehash] = [full_file_name]
 
-    # Перетворюємо словник hashes у словник duplicates
-    for filehash, paths in hashes.items():
+    # convert file_hashes dict into duplicate_files dict
+    for filehash, paths in file_hashes.items():
         if len(paths) > 1:
-            for path in paths:
-                if path in duplicates:
-                    duplicates[path].extend(paths)
-                    duplicates[path].remove(path)
+            for full_file_name in paths:
+                if full_file_name in duplicate_files:
+                    duplicate_files[full_file_name].extend(paths)
+                    duplicate_files[full_file_name].remove(full_file_name)
                 else:
-                    duplicates[path] = list(set(paths) - set([path]))
+                    duplicate_files[full_file_name] = list(set(paths) - set([full_file_name]))
 
-    return duplicates
+    return duplicate_files
 
 
 if __name__ == "__main__":

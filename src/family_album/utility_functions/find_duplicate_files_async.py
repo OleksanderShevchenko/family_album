@@ -77,10 +77,12 @@ if __name__ == "__main__":
     t1_start = perf_counter()
     duplicates = find_duplicate_files(testing_directory)
     t1_stop = perf_counter()
+    duplications_only = {file[0]: file[1:] for _, file in duplicates.items()
+                         if len(file) > 1}
     print(f'Synchronous function was checking dir "{testing_directory}" for duplicate files for {t1_stop - t1_start} seconds.')
 
-    with open(os.path.join(save_result_directory, "duplicates_sync.txt"), 'wt') as fp:
+    with open(os.path.join(save_result_directory, "duplicates_sync1.txt"), 'wt') as fp:
         fp.write(json.dumps(duplications_only))
-    with open(os.path.join(save_result_directory, "hash_files_sync.txt"), 'wt') as fp:
+    with open(os.path.join(save_result_directory, "hash_files_sync1.txt"), 'wt') as fp:
         fp.write(json.dumps(duplicates))
     print("Done!")

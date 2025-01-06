@@ -2,49 +2,44 @@ import json
 import os
 import hashlib
 from time import perf_counter
+from typing import List, Dict
 
 
-def find_duplicate_files(directory: str) -> dict:
+def find_duplicate_files(directory: str) -> Dict[str, List[str]]:
     # create empty dicts for hash and for duplicates
     file_hashes = {}
-    duplicate_files = {}
 
     # iterate though all files and subdirectories
-    for root, dirs, files in os.walk(directory):
-        for filename in files:
+    for dirpath, _, file_names in os.walk(directory):
+        for filename in file_names:
             # calculate file hash
-            full_file_name = os.path.join(root, filename)
+            full_file_name = os.path.join(dirpath, filename)
             with open(full_file_name, 'rb') as file:
                 filehash = hashlib.blake2b(file.read()).hexdigest()
 
             # add hash and file name to dictionary
-            if filehash in file_hashes:
+            if filehash in file_hashes.keys() and full_file_name not in file_hashes[filehash]:
                 file_hashes[filehash].append(full_file_name)
             else:
                 file_hashes[filehash] = [full_file_name]
 
-    # convert file_hashes dict into duplicate_files dict
-    for filehash, paths in file_hashes.items():
-        if len(paths) > 1:
-            for full_file_name in paths:
-                if full_file_name in duplicate_files:
-                    duplicate_files[full_file_name].extend(paths)
-                    duplicate_files[full_file_name].remove(full_file_name)
-                else:
-                    duplicate_files[full_file_name] = list(set(paths) - set([full_file_name]))
-
-    return duplicate_files
+    return file_hashes
 
 
 if __name__ == "__main__":
-    path = "E:/"
+    testing_directory = "<put your dir here>"  # dir to check for duplication
+    save_result_directory = "<put your dir here>"  # dir to save results
+
     t1_start = perf_counter()
-    duplicates = find_duplicate_files(path)
+    duplicates = find_duplicate_files(testing_directory)
     t1_stop = perf_counter()
+    duplications_only = {file[0]: file[1:] for _, file in duplicates.items()
+                         if len(file) > 1}
+    print(
+        f'Synchronous function was checking dir "{testing_directory}" for duplicate files for {t1_stop - t1_start} seconds.')
 
-    print(f'Duplicates are: {duplicates}')
-    print(f' Checking dir{path} for duplicate files takes {t1_stop - t1_start} seconds.')
-    with open(r"C:\Users\Oleksander\duplicates.txt", 'wt') as fp:
+    with open(os.path.join(save_result_directory, "duplicates_sync2.txt"), 'wt') as fp:
+        fp.write(json.dumps(duplications_only))
+    with open(os.path.join(save_result_directory, "hash_files_sync2.txt"), 'wt') as fp:
         fp.write(json.dumps(duplicates))
-
-
+    print("Done!")

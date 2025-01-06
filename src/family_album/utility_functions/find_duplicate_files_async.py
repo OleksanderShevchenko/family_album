@@ -15,7 +15,8 @@ async def _get_file_hash(file_full_name: str, semaphore: asyncio.Semaphore) -> T
     """
     Calculate hash of the file asynchronously.
     """
-
+    if not os.path.isfile(file_full_name):
+        return "", file_full_name
     hasher = hashlib.blake2b()
     try:
         async with semaphore:
@@ -72,17 +73,4 @@ if __name__ == "__main__":
     with open(os.path.join(save_result_directory,"hash_files_async.txt"), 'wt') as fp:
         fp.write(json.dumps(duplicates))
 
-    from src.family_album.utility_functions.find_duplicate_files import find_duplicate_files
-
-    t1_start = perf_counter()
-    duplicates = find_duplicate_files(testing_directory)
-    t1_stop = perf_counter()
-    duplications_only = {file[0]: file[1:] for _, file in duplicates.items()
-                         if len(file) > 1}
-    print(f'Synchronous function was checking dir "{testing_directory}" for duplicate files for {t1_stop - t1_start} seconds.')
-
-    with open(os.path.join(save_result_directory, "duplicates_sync1.txt"), 'wt') as fp:
-        fp.write(json.dumps(duplications_only))
-    with open(os.path.join(save_result_directory, "hash_files_sync1.txt"), 'wt') as fp:
-        fp.write(json.dumps(duplicates))
     print("Done!")

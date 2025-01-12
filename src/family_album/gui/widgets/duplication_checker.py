@@ -9,6 +9,7 @@ from PyQt5.QtCore import pyqtSignal, QStringListModel, Qt
 from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel
 
 from src.family_album.utility_functions.find_duplicate_files_async import find_duplicate_files_async
+from src.family_album.utility_functions.find_duplicate_files_multythreaded import find_duplicate_files_multithreaded
 from src.family_album.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
 from src.family_album.utility_functions.image_utils import is_image_file
 
@@ -71,7 +72,7 @@ class DuplicationChecker(QtWidgets.QWidget):
         try:
             self.pbCheckDuplications.setEnabled(False)
             self.update()
-            self.files_hash = asyncio.run(find_duplicate_files_async(self._selected_path))
+            self.files_hash = find_duplicate_files_multithreaded(self._selected_path)  # asyncio.run(find_duplicate_files_async(self._selected_path))
             self.duplications = {file[0]: file[1:] for _, file in self.files_hash.items()
                                  if len(file) > 1}
             original_files = list(self.duplications.keys())

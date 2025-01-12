@@ -3,7 +3,8 @@ import os.path
 import unittest
 from datetime import datetime
 
-from src.family_album.utility_functions.image_utils import (is_image_file, get_image_size, get_image_creation_date, get_image_exif)
+from src.family_album.utility_functions.image_utils import (is_image_file, get_image_size, get_image_creation_date,
+                                                            get_image_exif)
 
 
 class TestImageUtils(unittest.TestCase):

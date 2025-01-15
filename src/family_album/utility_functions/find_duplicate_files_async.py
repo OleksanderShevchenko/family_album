@@ -21,11 +21,8 @@ async def _get_file_hash(file_full_name: str, semaphore: asyncio.Semaphore) -> T
     try:
         async with semaphore:
             async with aiofiles.open(file_full_name, 'rb') as file:
-                while True:
-                    buf = await file.read(_BLOCK_SIZE)
-                    if not buf:
-                        break
-                    hasher.update(buf)
+                buf = await file.read()
+                hasher.update(buf)
     except Exception as e:
         print(f"Error reading file {file_full_name}: {e}")
         return "", file_full_name

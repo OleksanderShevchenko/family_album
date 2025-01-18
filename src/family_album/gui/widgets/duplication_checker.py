@@ -99,7 +99,8 @@ class DuplicationChecker(QtWidgets.QWidget):
         finally:
             self.pbCheckDuplications.setEnabled(True)
 
-    def __show_message(self, message: str) -> None:
+    @staticmethod
+    def __show_message(message: str) -> None:
         msg = QMessageBox()
         msg.setWindowTitle("Duplication analysis")
         msg.setText(message)
@@ -142,66 +143,79 @@ class DuplicationChecker(QtWidgets.QWidget):
         if not self.duplications:
             self.__show_message("Duplication files are not defined!")
             return
-        dump_file = os.path.join(self.selected_path, "duplicate_files_analysis_result.json")
-        data_to_store = {}
-        data_to_store["hash_data"] = self.files_hash
-        data_to_store["duplication_data"] = self.duplications
-        with open(dump_file, 'w') as fp:
-            json.dump(data_to_store, fp, indent=2, ensure_ascii=False)
+        try:
+            dump_file = os.path.join(self.selected_path, "duplicate_files_analysis_result.json")
+            data_to_store = {}
+            data_to_store["hash_data"] = self.files_hash
+            data_to_store["duplication_data"] = self.duplications
+            with open(dump_file, 'w') as fp:
+                json.dump(data_to_store, fp)
+        except Exception as err:
+            print(f"Error occur: {err}")
+            self.__show_message(f"Error occur: {err}")
 
     def evt_move_duplications(self) -> None:
         if not self.duplications:
             self.__show_message("Duplication files are not defined!")
             return
-        target_dir = os.path.join(self.selected_path, "duplications")
-        if not os.path.isdir(target_dir):
-            os.mkdir(target_dir)
-        protocol = {}
-        count_moved = 0
-        for original_file, duplicated_files in self.duplications.items():
-            for file in duplicated_files:
-                target_file = os.path.join(target_dir, os.path.basename(file))
-                if os.path.isfile(target_file):
-                    i = 1
-                    while os.path.isfile(target_file):
-                        dir_name = os.path.dirname(target_file)
-                        file_name, extention = os.path.splitext(os.path.basename(target_file))
-                        target_file = os.path.join(dir_name, f"{file_name}_copy{i}{extention}")
-                        i += 1
-                try:
-                    shutil.move(file, target_file)
-                    count_moved += 1
-                except Exception as err:
-                    self.__show_message(f"Could not move file '{file}' into the directory '{target_dir}'! \n" +
-                                        f"Error: {err}")
-                else:
-                    protocol[f'Move_#{count_moved}'] = {}
-                    protocol[f'Move_#{count_moved}']["original"] = original_file
-                    protocol[f'Move_#{count_moved}']["moved_from"] = file
-                    protocol[f'Move_#{count_moved}']["moved_to"] = target_file
-        # save protocol
-        protocol_file_name = os.path.join(target_dir, "protocol_of_moving_duplications.json")
-        with open(protocol_file_name, 'w') as fp:
-            json.dump(protocol, fp, indent=2, ensure_ascii=False)
-        message = f"Totally moved {count_moved} files to '{target_dir}'"
-        self.ItemSelected.emit(message)
-        self.__show_message(message)
-        self.files_hash = {}
-        self.duplications = {}
-        self.pbMove.setEnabled(False)
-        self.pbDumpDuplications.setEnabled(False)
+        try:
+            target_dir = os.path.join(self.selected_path, "duplications")
+            if not os.path.isdir(target_dir):
+                os.mkdir(target_dir)
+            protocol = {}
+            count_moved = 0
+            for original_file, duplicated_files in self.duplications.items():
+                for file in duplicated_files:
+                    target_file = os.path.join(target_dir, os.path.basename(file))
+                    if os.path.isfile(target_file):
+                        i = 1
+                        while os.path.isfile(target_file):
+                            dir_name = os.path.dirname(target_file)
+                            file_name, extention = os.path.splitext(os.path.basename(target_file))
+                            target_file = os.path.join(dir_name, f"{file_name}_copy{i}{extention}")
+                            i += 1
+                    try:
+                        shutil.move(file, target_file)
+                        count_moved += 1
+                    except Exception as err:
+                        self.__show_message(f"Could not move file '{file}' into the directory '{target_dir}'! \n" +
+                                            f"Error: {err}")
+                    else:
+                        protocol[f'Move_#{count_moved}'] = {}
+                        protocol[f'Move_#{count_moved}']["original"] = original_file
+                        protocol[f'Move_#{count_moved}']["moved_from"] = file
+                        protocol[f'Move_#{count_moved}']["moved_to"] = target_file
+            # save protocol
+            protocol_file_name = os.path.join(target_dir, "protocol_of_moving_duplications.json")
+            with open(protocol_file_name, 'w') as fp:
+                json.dump(protocol, fp, indent=2, ensure_ascii=False)
+        except Exception as err:
+            print(f"Error occur: {err}")
+            self.__show_message(f"Error occur: {err}")
+        finally:
+            message = f"Totally moved {count_moved} files to '{target_dir}'"
+            self.ItemSelected.emit(message)
+            self.__show_message(message)
+            self.files_hash = {}
+            self.duplications = {}
+            self.pbMove.setEnabled(False)
+            self.pbDumpDuplications.setEnabled(False)
 
     def __show_image(self, label: QLabel, image_file_name: str, display_in_statusbar: bool = False) -> None:
-        pix_map = QtGui.QPixmap(image_file_name)
-        resolution = f"{pix_map.width()} x {pix_map.height()}"
-        w: int = min(label.maximumWidth(), pix_map.width())
-        h: int = min(label.maximumHeight(), pix_map.height())
-        pix_map.scaled(w, h, Qt.KeepAspectRatio)
-        label.setPixmap(pix_map)
-        label.setScaledContents(True)
-        label.show()
-        if display_in_statusbar:
-            self.ItemSelected.emit(f"Selected file - {image_file_name} has resolution {resolution}")
+        try:
+            pix_map = QtGui.QPixmap(image_file_name)
+            resolution = f"{pix_map.width()} x {pix_map.height()}"
+            w: int = min(label.maximumWidth(), pix_map.width())
+            h: int = min(label.maximumHeight(), pix_map.height())
+            pix_map.scaled(w, h, Qt.KeepAspectRatio)
+            label.setPixmap(pix_map)
+            label.setScaledContents(True)
+            label.show()
+            if display_in_statusbar:
+                self.ItemSelected.emit(f"Selected file - {image_file_name} has resolution {resolution}")
+        except Exception as err:
+            print(f"Error occur: {err}")
+            self.__show_message(f"Error occur: {err}")
 
 
 if __name__ == "__main__":

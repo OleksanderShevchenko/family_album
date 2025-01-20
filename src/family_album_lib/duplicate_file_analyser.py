@@ -5,7 +5,7 @@ from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-from PyQt5.QtCore import pyqtSignal, QObject
+from PyQt5.QtCore import pyqtSignal, QObject, QThread
 
 from src.family_album_lib.directory_analyser import DirectoryAnalyser
 
@@ -45,7 +45,24 @@ class DuplicateFileAnalyser(QObject):
     def subdirectories_count_in_directory(self) -> int:
         return self._directory_analyser.subdirectories_count_in_directory
 
-    def find_duplicate_files_multithreaded(self) -> Dict[str, List[str]]:
+    @property
+    def files_hashes(self) -> Dict[str, List[str]]:
+        return self.__files_hashes
+
+    @property
+    def duplicate_files(self) -> Dict[str, List[str]]:
+        if len(self.__files_hashes) > 0:
+            return {file[0]: file[1:] for _, file in self.__files_hashes.items() if len(file) > 1}
+        else:
+            return {}
+
+    def start_analysis_thread(self):
+        analysis_thread = QThread()
+        self.moveToThread(analysis_thread)
+        analysis_thread.started.connect(self._find_duplicate_files_multithreaded)
+        analysis_thread.start()
+
+    def _find_duplicate_files_multithreaded(self) -> Dict[str, List[str]]:
         # create empty dicts for hash and for duplicates
         self.__files_hashes = {}
         self.__files_analysed = 0

@@ -6,18 +6,17 @@ import sys
 from os import path
 from PyQt5 import QtWidgets, uic, QtGui
 from PyQt5.QtCore import pyqtSignal, QStringListModel, Qt
-from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel
+from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow
 
-from src.family_album.utility_functions.find_duplicate_files_async import find_duplicate_files_async
-from src.family_album.utility_functions.find_duplicate_files_multythreaded import find_duplicate_files_multithreaded
-from src.family_album.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
 from src.family_album.utility_functions.image_utils import is_image_file
+from src.family_album_lib.duplicate_file_analyser import DuplicateFileAnalyser
 
 
 class DuplicationChecker(QtWidgets.QWidget):
     ItemSelected = pyqtSignal(str)
 
     def __init__(self, parent):
+        self._parent: QMainWindow = parent
         super(DuplicationChecker, self).__init__(parent)
         uic.loadUi(path.dirname(__file__) + '/py_ui/duplication_checker_ui.ui', self)
         self._selected_path: str = ""
@@ -39,6 +38,7 @@ class DuplicationChecker(QtWidgets.QWidget):
         self.pbCheckDuplications.setEnabled(False)
         self.pbDumpDuplications.setEnabled(False)
         self.pbMove.setEnabled(False)
+        self._duplication_checker: DuplicateFileAnalyser = None
 
     @property
     def selected_path(self) -> str:
@@ -53,6 +53,10 @@ class DuplicationChecker(QtWidgets.QWidget):
             self.pbCheckDuplications.setEnabled(True)
             self.pbDumpDuplications.setEnabled(False)
             self.pbMove.setEnabled(False)
+            self._duplication_checker = DuplicateFileAnalyser(new_path)
+            self._duplication_checker.start_analysis.connect(self._parent.evt_start_analysis)
+            self._duplication_checker.update_progress.connect(self._parent.evt_update_progress)
+            # self._duplication_checker.finish_analysis.connect(self._parent.evt_finish_analysis)
         else:
             self._selected_path = ""
             self.lblFName.setText("<>")
@@ -61,6 +65,7 @@ class DuplicationChecker(QtWidgets.QWidget):
             self.pbCheckDuplications.setEnabled(False)
             self.pbDumpDuplications.setEnabled(False)
             self.pbMove.setEnabled(False)
+            self._duplication_checker = None
         self.files_hash: dict = {}
         self.duplications: dict = {}
         self.lst_original_files.setModel(QStringListModel([]))
@@ -72,7 +77,7 @@ class DuplicationChecker(QtWidgets.QWidget):
         try:
             self.pbCheckDuplications.setEnabled(False)
             self.update()
-            self.files_hash = find_duplicate_files_multithreaded(self._selected_path)  # asyncio.run(find_duplicate_files_async(self._selected_path))
+            self.files_hash = self._duplication_checker.find_duplicate_files_multithreaded()
             self.duplications = {file[0]: file[1:] for _, file in self.files_hash.items()
                                  if len(file) > 1}
             original_files = list(self.duplications.keys())
@@ -110,7 +115,8 @@ class DuplicationChecker(QtWidgets.QWidget):
     def evt_analyze_selected(self):
         try:
             self.pbAnalyze.setEnabled(False)
-            file_count, dir_count = get_files_and_subdirs_count(self._selected_path)
+            file_count = self._duplication_checker.files_count_in_directory
+            dir_count = self._duplication_checker.subdirectories_count_in_directory
             message = f'Selected directory totally has got {file_count} files and {dir_count} sub-directories'
             self.lblInfo.setText(message)
         except Exception as err:

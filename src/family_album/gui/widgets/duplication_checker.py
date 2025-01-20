@@ -56,7 +56,6 @@ class DuplicationChecker(QtWidgets.QWidget):
             self._duplication_checker = DuplicateFileAnalyser(new_path)
             self._duplication_checker.start_analysis.connect(self._parent.evt_start_analysis)
             self._duplication_checker.update_progress.connect(self._parent.evt_update_progress)
-            # self._duplication_checker.finish_analysis.connect(self._parent.evt_finish_analysis)
         else:
             self._selected_path = ""
             self.lblFName.setText("<>")
@@ -77,9 +76,21 @@ class DuplicationChecker(QtWidgets.QWidget):
         try:
             self.pbCheckDuplications.setEnabled(False)
             self.update()
-            self.files_hash = self._duplication_checker.find_duplicate_files_multithreaded()
-            self.duplications = {file[0]: file[1:] for _, file in self.files_hash.items()
-                                 if len(file) > 1}
+            self._duplication_checker.start_analysis_thread()
+
+        except Exception as err:
+            print(f"Error occur: {err}")
+            self.__show_message(f"Error occur: {err}")
+            self.pbDumpDuplications.setEnabled(False)
+            self.pbMove.setEnabled(False)
+        finally:
+            self.pbCheckDuplications.setEnabled(True)
+
+    def populate_duplications(self) -> None:
+        self.files_hash = {}
+        self.duplications = {}
+        try:
+            self.duplications = self._duplication_checker.duplicate_files
             original_files = list(self.duplications.keys())
             if len(original_files) > 0:
                 model = QStringListModel(original_files)
@@ -101,8 +112,6 @@ class DuplicationChecker(QtWidgets.QWidget):
             self.__show_message(f"Error occur: {err}")
             self.pbDumpDuplications.setEnabled(False)
             self.pbMove.setEnabled(False)
-        finally:
-            self.pbCheckDuplications.setEnabled(True)
 
     @staticmethod
     def __show_message(message: str) -> None:

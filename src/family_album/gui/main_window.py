@@ -103,4 +103,5 @@ class MainWindow(QMainWindow):
         self.progressBar.setTextVisible(False)
         self.statusBar().showMessage(message, self._interval)
         self._logger.log_debug(f"Finish analysis '{message}'")
+        self.duplication_checker.populate_duplications()
         self.update()

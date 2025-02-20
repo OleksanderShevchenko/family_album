@@ -22,7 +22,7 @@ def show_splash(name, version):
     splash_pix = QtGui.QPixmap(_image_path + '/splashscreen.png')
     _splash = QtWidgets.QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
     _splash.showMessage(name + ' v' + version + ' is loading. Please wait...', Qt.AlignHCenter |
-                        Qt.AlignBottom, Qt.black)
+                        Qt.AlignBottom, Qt.white)
     _splash.show()
 
 

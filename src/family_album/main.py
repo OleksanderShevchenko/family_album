@@ -1,7 +1,7 @@
 __author__ = "Oleksander Shevchenko"
 __contact__ = "alexcad777@meta.ua"
-__version__ = "0.1"
-__license__ = """<SOME LICENSE TEXT HERE>"""
+__version__ = "0.1.0"
+__license__ = """Mit license"""
 
 import sys
 import time
@@ -10,7 +10,7 @@ from src.family_album.gui.application import create_app, show_splash, run
 
 
 tool_name = 'Family Album tool'
-tool_version = '0.0.1'
+tool_version = __version__
 
 
 def trap_exc_during_debug(*args):

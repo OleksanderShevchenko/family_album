@@ -6,7 +6,7 @@ import sys
 from os import path
 from PyQt5 import QtWidgets, uic, QtGui
 from PyQt5.QtCore import pyqtSignal, QStringListModel, Qt
-from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow
+from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu, QAction
 
 from src.family_album.utility_functions.image_utils import is_image_file
 from src.family_album_lib.duplicate_file_analyser import DuplicateFileAnalyser
@@ -34,6 +34,8 @@ class DuplicationChecker(QtWidgets.QWidget):
         self.lst_duplications.setModel(QStringListModel([]))
         self.lst_original_files.selectionModel().currentChanged.connect(self.evt_original_file_selected)
         self.lst_duplications.selectionModel().currentChanged.connect(self.evt_duplicated_file_selected)
+        self.lst_duplications.setContextMenuPolicy(Qt.CustomContextMenu)  # Important
+        self.lst_duplications.customContextMenuRequested.connect(self.evt_show_context_menu)
         self.pbAnalyze.setEnabled(False)
         self.pbCheckDuplications.setEnabled(False)
         self.pbDumpDuplications.setEnabled(False)
@@ -215,6 +217,20 @@ class DuplicationChecker(QtWidgets.QWidget):
             self.duplications = {}
             self.pbMove.setEnabled(False)
             self.pbDumpDuplications.setEnabled(False)
+
+    def evt_show_context_menu(self, pos):
+        index = self.lst_duplications.indexAt(pos)
+        if index.isValid():  # Check if an item is selected
+            menu = QMenu(self)
+            # Example actions:
+            open_action = QAction("Set original", self)
+            open_action.triggered.connect(lambda: self._set_original(index))  # Pass the index
+            menu.addAction(open_action)
+
+            menu.exec_(self.lst_duplications.viewport().mapToGlobal(pos))  # Show the menu at the cursor position
+
+    def _set_original(self, index: int) -> None:
+        print(index)
 
     def __show_image(self, label: QLabel, image_file_name: str, display_in_statusbar: bool = False) -> None:
         try:

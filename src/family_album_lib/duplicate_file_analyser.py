@@ -1,20 +1,16 @@
 import json
 import os
 import hashlib
-from typing import List, Dict
+from typing import List, Dict, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-
-from PyQt5.QtCore import pyqtSignal, QObject, QThread
+from threading import Thread, Lock
 
 from src.family_album_lib.directory_analyser import DirectoryAnalyser
 
 
-class DuplicateFileAnalyser(QObject):
+class DuplicateFileAnalyser():
 
     _NUM_OPEN_FILES = 200
-    start_analysis = pyqtSignal(str)
-    update_progress = pyqtSignal(int, int)
 
     def __init__(self, directory: str, instantly_opened_files: int = 0) -> None:
         super().__init__()
@@ -26,6 +22,9 @@ class DuplicateFileAnalyser(QObject):
             self.__num_of_threads = self._NUM_OPEN_FILES
         else:
             self.__num_of_threads = instantly_opened_files
+        self.start_analysis: Callable = None
+        self.update_progress: Callable = None
+        self.log_event: Callable = None
 
     @property
     def directory(self) -> str:
@@ -57,19 +56,18 @@ class DuplicateFileAnalyser(QObject):
             return {}
 
     def start_analysis_thread(self):
-        analysis_thread = QThread()
-        self.moveToThread(analysis_thread)
-        analysis_thread.started.connect(self._find_duplicate_files_multithreaded)
-        analysis_thread.start()
+        self._find_duplicate_files_multithreaded()
 
-    def _find_duplicate_files_multithreaded(self) -> Dict[str, List[str]]:
+
+    def _find_duplicate_files_multithreaded(self) -> None:
         # create empty dicts for hash and for duplicates
         self.__files_hashes = {}
         self.__files_analysed = 0
         self.__progress = 0
         total_files = self._directory_analyser.files_count_in_directory
-        self.start_analysis.emit("Start analysis.")
-        lock = threading.Lock()  # use lock to avoid simultaneous edit dictionary 'file_hashes' from several threads
+        if isinstance(self.start_analysis, Callable):
+            self.start_analysis("Start analysis.")
+        lock = Lock()  # use lock to avoid simultaneous edit dictionary 'file_hashes' from several threads
 
         def _get_files_hash(file_name: str) -> None:
             """
@@ -81,7 +79,10 @@ class DuplicateFileAnalyser(QObject):
                 with open(file_name, 'rb') as file:
                     filehash = hashlib.blake2b(file.read()).hexdigest()
             except Exception as e:
-                print(f"Error reading file {file_name}: {e}")
+                m = f"Error reading file {file_name}: {e}"
+                if isinstance(self.log_event, Callable):
+                    self.log_event(m)
+                print(m)
                 return
             else:
                 with lock:  # context manager will release lock automatically even in case of an error
@@ -94,7 +95,8 @@ class DuplicateFileAnalyser(QObject):
                 current_progress = int(self.__files_analysed / total_files * 100)
                 if current_progress > self.__progress:
                     self.__progress = current_progress
-                    self.update_progress.emit(self.__files_analysed, total_files)
+                    if isinstance(self.update_progress, Callable):
+                        self.update_progress(self.__files_analysed, total_files)
 
         # create thread pool with max threads of _NUM_OPEN_FILES which limits
         with ThreadPoolExecutor(max_workers=self._NUM_OPEN_FILES) as executor:
@@ -107,4 +109,4 @@ class DuplicateFileAnalyser(QObject):
 
             for future in as_completed(futures):
                 future.result()  # wait for all threads to complete
-        return self.__files_hashes
+        return

@@ -56,8 +56,9 @@ class DuplicationChecker(QtWidgets.QWidget):
             self.pbDumpDuplications.setEnabled(False)
             self.pbMove.setEnabled(False)
             self._duplication_checker = DuplicateFileAnalyser(new_path)
-            self._duplication_checker.start_analysis.connect(self._parent.evt_start_analysis)
-            self._duplication_checker.update_progress.connect(self._parent.evt_update_progress)
+            self._duplication_checker.start_analysis = self._parent.evt_start_analysis
+            self._duplication_checker.update_progress = self._parent.evt_update_progress
+            self._duplication_checker.log_event = self._parent.log_event
         else:
             self._selected_path = ""
             self.lblFName.setText("<>")
@@ -81,8 +82,10 @@ class DuplicationChecker(QtWidgets.QWidget):
             self._duplication_checker.start_analysis_thread()
 
         except Exception as err:
-            print(f"Error occur: {err}")
-            self.__show_message(f"Error occur: {err}")
+            m = f"Error occur: {err}"
+            print(m)
+            self.__show_message(m)
+            self._parent.log_event(m)
             self.pbDumpDuplications.setEnabled(False)
             self.pbMove.setEnabled(False)
         finally:
@@ -107,21 +110,23 @@ class DuplicationChecker(QtWidgets.QWidget):
                                f"Total number of duplicate files are - {duplicated_files_count}")
                     self.ItemSelected.emit(message)
                     self.__show_message(message)
+                    self._parent.log_event(message)
             else:
-                self.__show_message("No duplication files found")
+                message = "No duplication files found"
+                self.__show_message(message)
+                self._parent.log_event(message)
         except Exception as err:
-            print(f"Error occur: {err}")
-            self.__show_message(f"Error occur: {err}")
+            m = f"Error occur: {err}"
+            print(m)
+            self.__show_message(m)
+            self._parent.log_event(m)
             self.pbDumpDuplications.setEnabled(False)
             self.pbMove.setEnabled(False)
 
     @staticmethod
     def __show_message(message: str) -> None:
-        msg = QMessageBox()
-        msg.setWindowTitle("Duplication analysis")
-        msg.setText(message)
-        msg.setIcon(QMessageBox.Warning)
-        msg.exec_()
+        pass
+
 
     def evt_analyze_selected(self):
         try:
@@ -131,8 +136,10 @@ class DuplicationChecker(QtWidgets.QWidget):
             message = f'Selected directory totally has got {file_count} files and {dir_count} sub-directories'
             self.lblInfo.setText(message)
         except Exception as err:
-            print(f"Error occur: {err}")
-            self.__show_message(f"Error occur: {err}")
+            m = f"Error occur: {err}"
+            print(m)
+            self.__show_message(m)
+            self._parent.log_event(m)
         finally:
             self.pbAnalyze.setEnabled(True)
 
@@ -168,8 +175,10 @@ class DuplicationChecker(QtWidgets.QWidget):
             with open(dump_file, 'w') as fp:
                 json.dump(data_to_store, fp)
         except Exception as err:
-            print(f"Error occur: {err}")
-            self.__show_message(f"Error occur: {err}")
+            m = f"Error occur: {err}"
+            print(m)
+            self.__show_message(m)
+            self._parent.log_event(m)
 
     def evt_move_duplications(self) -> None:
         if not self.duplications:
@@ -195,8 +204,11 @@ class DuplicationChecker(QtWidgets.QWidget):
                         shutil.move(file, target_file)
                         count_moved += 1
                     except Exception as err:
-                        self.__show_message(f"Could not move file '{file}' into the directory '{target_dir}'! \n" +
-                                            f"Error: {err}")
+                        m = (f"Could not move file '{file}' into the directory '{target_dir}'! \n" +
+                             f"Error: {err}")
+                        print(m)
+                        self.__show_message(m)
+                        self._parent.log_event(m)
                     else:
                         protocol[f'Move_#{count_moved}'] = {}
                         protocol[f'Move_#{count_moved}']["original"] = original_file
@@ -207,12 +219,15 @@ class DuplicationChecker(QtWidgets.QWidget):
             with open(protocol_file_name, 'w') as fp:
                 json.dump(protocol, fp, indent=2, ensure_ascii=False)
         except Exception as err:
-            print(f"Error occur: {err}")
-            self.__show_message(f"Error occur: {err}")
+            m = f"Error occur: {err}"
+            print(m)
+            self.__show_message(m)
+            self._parent.log_event(m)
         finally:
             message = f"Totally moved {count_moved} files to '{target_dir}'"
             self.ItemSelected.emit(message)
             self.__show_message(message)
+            self._parent.log_event(message)
             self.files_hash = {}
             self.duplications = {}
             self.pbMove.setEnabled(False)
@@ -245,8 +260,10 @@ class DuplicationChecker(QtWidgets.QWidget):
             if display_in_statusbar:
                 self.ItemSelected.emit(f"Selected file - {image_file_name} has resolution {resolution}")
         except Exception as err:
-            print(f"Error occur: {err}")
-            self.__show_message(f"Error occur: {err}")
+            m = f"Error occur: {err}"
+            print(m)
+            self.__show_message(m)
+            self._parent.log_event(m)
 
 
 if __name__ == "__main__":

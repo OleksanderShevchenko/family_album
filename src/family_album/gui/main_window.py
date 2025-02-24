@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
         try:
             self.window = uic.loadUi(os.path.dirname(__file__) + '/py_ui/main_window.ui', self)
             self.title = name + ' v.' + version
-            self._interval = 10000  # msec
+            self._interval = 10_000  # msec interval for show message in status bar
             self.setWindowTitle(self.title)
             self.dir_viewer = DirectoryView(self)
             self.dir_viewer.ItemSelected.connect(self.evt_dir_selected)
@@ -105,3 +105,11 @@ class MainWindow(QMainWindow):
         self._logger.log_debug(f"Finish analysis '{message}'")
         self.duplication_checker.populate_duplications()
         self.update()
+
+    def log_event(self, message: str) -> None:
+        if 'error' in message.lower():
+            self._logger.log_error(message)
+        elif 'warning' in message.lower():
+            self._logger.log_warning(message)
+        else:
+            self._logger.log_info(message)

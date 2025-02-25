@@ -5,8 +5,8 @@ import shutil
 import sys
 from os import path
 from PyQt5 import QtWidgets, uic, QtGui
-from PyQt5.QtCore import pyqtSignal, QStringListModel, Qt
-from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu, QAction
+from PyQt5.QtCore import pyqtSignal, QStringListModel, Qt, QItemSelectionModel
+from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu, QAction, QListView
 
 from src.family_album.utility_functions.image_utils import is_image_file
 from src.family_album_lib.duplicate_file_analyser import DuplicateFileAnalyser
@@ -96,25 +96,8 @@ class DuplicationChecker(QtWidgets.QWidget):
         self.duplications = {}
         try:
             self.duplications = self._duplication_checker.duplicate_files
-            original_files = list(self.duplications.keys())
-            if len(original_files) > 0:
-                model = QStringListModel(original_files)
-                self.lst_original_files.setModel(model)
-                self.lst_original_files.selectionModel().currentChanged.connect(self.evt_original_file_selected)
-                if len(self.duplications) > 0:
-                    self.pbDumpDuplications.setEnabled(True)
-                    self.pbMove.setEnabled(True)
-                    duplicated_files_count = sum([len(item) for item in self.duplications.values()])
-                    files_with_duplicates_count = len(self.duplications)
-                    message = (f"Totally were found {files_with_duplicates_count} files with duplicates. " +
-                               f"Total number of duplicate files are - {duplicated_files_count}")
-                    self.ItemSelected.emit(message)
-                    self.__show_message(message)
-                    self._parent.log_event(message)
-            else:
-                message = "No duplication files found"
-                self.__show_message(message)
-                self._parent.log_event(message)
+            self.files_hash = self._duplication_checker.files_hashes
+            self.__populate_files()
         except Exception as err:
             m = f"Error occur: {err}"
             print(m)
@@ -122,6 +105,27 @@ class DuplicationChecker(QtWidgets.QWidget):
             self._parent.log_event(m)
             self.pbDumpDuplications.setEnabled(False)
             self.pbMove.setEnabled(False)
+
+    def __populate_files(self):
+        original_files = list(self.duplications.keys())
+        if len(original_files) > 0:
+            model = QStringListModel(original_files)
+            self.lst_original_files.setModel(model)
+            self.lst_original_files.selectionModel().currentChanged.connect(self.evt_original_file_selected)
+            if len(self.duplications) > 0:
+                self.pbDumpDuplications.setEnabled(True)
+                self.pbMove.setEnabled(True)
+                duplicated_files_count = sum([len(item) for item in self.duplications.values()])
+                files_with_duplicates_count = len(self.duplications)
+                message = (f"Totally were found {files_with_duplicates_count} files with duplicates. " +
+                           f"Total number of duplicate files are - {duplicated_files_count}")
+                self.ItemSelected.emit(message)
+                self.__show_message(message)
+                self._parent.log_event(message)
+        else:
+            message = "No duplication files found"
+            self.__show_message(message)
+            self._parent.log_event(message)
 
     @staticmethod
     def __show_message(message: str) -> None:
@@ -236,16 +240,61 @@ class DuplicationChecker(QtWidgets.QWidget):
     def evt_show_context_menu(self, pos):
         index = self.lst_duplications.indexAt(pos)
         if index.isValid():  # Check if an item is selected
+            item_text = self.lst_duplications.model().data(index, Qt.DisplayRole)  # Get the text
+
             menu = QMenu(self)
             # Example actions:
             open_action = QAction("Set original", self)
-            open_action.triggered.connect(lambda: self._set_original(index))  # Pass the index
+            open_action.triggered.connect(lambda: self._set_original(item_text))  # Pass the index
             menu.addAction(open_action)
 
             menu.exec_(self.lst_duplications.viewport().mapToGlobal(pos))  # Show the menu at the cursor position
 
-    def _set_original(self, index: int) -> None:
-        print(index)
+    def _set_original(self, duplicate_file: str) -> None:
+        selected_original_indexes = self.lst_original_files.selectionModel().selectedIndexes()
+
+        if selected_original_indexes:
+            # Get the first selected index (assuming single selection mode)
+            selected_index = selected_original_indexes[0]
+            original_file = self.lst_original_files.model().data(selected_index, Qt.DisplayRole)
+            self.__switch_original_with_duplicate(original_file, duplicate_file)
+            self.__populate_files()
+            self.__select_new_row(self.lst_original_files, duplicate_file)
+            try:
+                self.__select_new_row(self.lst_duplications, original_file)
+            except Exception:
+                pass
+
+        print(duplicate_file)
+
+    def __switch_original_with_duplicate(self,original_file, duplicate_file) -> None:
+        if original_file in self.duplications.keys() and duplicate_file not in self.duplications.keys():
+            duplication_list: list = self.duplications[original_file]
+            duplication_list.append(original_file)
+            self.duplications.pop(original_file)
+            duplication_list.remove(duplicate_file)
+            self.duplications[duplicate_file] = duplication_list
+        else:
+            m = f"Error switching original and duplication files - duplicate files in originals or original is absent."
+            print(m)
+            self.__show_message(m)
+            self._parent.log_event(m)
+
+    def __select_new_row(self, list_widget: QListView, target_text: str) -> None:
+        """Selects the row in a QListView that contains the specified text."""
+
+        model = list_widget.model()
+        if model is None:
+            return  # No model, nothing to select
+
+        for row in range(model.rowCount()):
+            index = model.index(row, 0)  # Assuming single-column list
+            item_text = model.data(index, Qt.DisplayRole)
+
+            if item_text == target_text:
+                selection_model = list_widget.selectionModel()
+                selection_model.setCurrentIndex(index, QItemSelectionModel.Select)
+                break  # Stop after the first match is found
 
     def __show_image(self, label: QLabel, image_file_name: str, display_in_statusbar: bool = False) -> None:
         try:

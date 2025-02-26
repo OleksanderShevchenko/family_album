@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "family-album"
+version = "0.1.0"
+description = ""
+authors = ["Олександр Шевченко <oleksandr.shevchenko@damen.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+requests = "^2.32.3"
+exifread = "^3.0.0"
+geopy = "^2.4.1"
+opencv-python = "^4.11.0.86"
+moviepy = "2.1.2"
+pillow = "^10.0.0"
+pandas = "^2.2.3"
+matplotlib = "^3.10.0"
+PyQt5 = ">=5.15"
+PyQt5-stubs = ">5.15"
+pyqt5-sip = "<12.12"
+pyqt5-qt5 = "5.15.2"
+aiofiles = "^24.1.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.2"
+pytest-xdist = "^3.6.1"
+pytest-randomly = "^3.15.0"
+
+[[tool.poetry.source]]
+name = "PyPI"
+priority = "primary"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

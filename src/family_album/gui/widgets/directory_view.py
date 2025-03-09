@@ -20,6 +20,12 @@ class DirectoryView(QtWidgets.QWidget):
         self.directory_tree.setRootIndex(self.indexRoot)
         self.directory_tree.clicked.connect(self.on_treeView_clicked)
         self.directory_tree.setColumnWidth(0, 200)
+        # Hide the second column ('size') as far as we do not show files
+        self.directory_tree.hideColumn(1)
+        # Sort directories by name in ascending order
+        self.directory_tree.sortByColumn(0, QtCore.Qt.AscendingOrder)
+        # Set the width for better visual presentation of directory names
+        self.directory_tree.setColumnWidth(0, 400)
 
     @QtCore.pyqtSlot(QtCore.QModelIndex)
     def on_treeView_clicked(self, index):

@@ -38,7 +38,7 @@ def run(name, version):
 
     # Create main window
     window = Main_Window(name, version)
-    window.show()
+    window.showMaximized()
     if _splash is not None:
         time.sleep(1)
         _splash.finish(window)

@@ -8,8 +8,8 @@ import logging
 import os
 import time
 
-from PyQt5 import uic, QtWidgets
-from PyQt5.QtWidgets import QMainWindow, QVBoxLayout
+from PyQt6 import uic, QtWidgets
+from PyQt6.QtWidgets import QMainWindow, QVBoxLayout
 
 # from .plot_canvas import PlotCanvas
 from src.family_album.gui.widgets.directory_view import DirectoryView

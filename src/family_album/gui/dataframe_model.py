@@ -1,8 +1,8 @@
 from typing import Any
 
 import pandas as pd
-from PyQt5 import QtCore
-from PyQt5.QtCore import QModelIndex
+from PyQt6 import QtCore
+from PyQt6.QtCore import QModelIndex
 from pandas import DataFrame
 
 

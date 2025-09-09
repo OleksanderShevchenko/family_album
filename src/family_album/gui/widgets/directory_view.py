@@ -1,8 +1,8 @@
 import sys
 from os import path
-from PyQt5 import QtWidgets, uic, QtCore, QtGui
-from PyQt5.QtCore import QDir, pyqtSignal
-from PyQt5.QtWidgets import QFileSystemModel, QTreeView, QVBoxLayout, QHBoxLayout, QDialog
+from PyQt6 import QtWidgets, uic, QtCore, QtGui
+from PyQt6.QtCore import QDir, pyqtSignal
+from PyQt6.QtWidgets import QFileSystemModel, QTreeView, QVBoxLayout, QHBoxLayout, QDialog
 
 
 class DirectoryView(QtWidgets.QWidget):

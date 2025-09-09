@@ -1,10 +1,10 @@
 import os.path
 import sys
 from os import path
-from PyQt5 import QtWidgets, uic
-from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtGui import QStandardItemModel
-from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox
+from PyQt6 import QtWidgets, uic
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QStandardItemModel
+from PyQt6.QtWidgets import QVBoxLayout, QDialog, QMessageBox
 
 from src.family_album.gui.dataframe_model import DataFrameModel
 from src.family_album.utility_functions.analyze_directory import analyze_directory

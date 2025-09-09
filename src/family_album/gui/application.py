@@ -2,9 +2,9 @@ import sys
 import os
 import time
 
-from PyQt5 import QtGui
-from PyQt5.QtCore import Qt
-from PyQt5 import QtWidgets
+from PyQt6 import QtGui
+from PyQt6.QtCore import Qt
+from PyQt6 import QtWidgets
 
 _splash = None
 _app = None

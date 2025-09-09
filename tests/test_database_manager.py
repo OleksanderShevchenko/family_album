@@ -1,7 +1,7 @@
 import unittest
 
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtSql import QSqlQueryModel, QSqlDatabase
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtSql import QSqlQueryModel, QSqlDatabase
 
 from src.family_album.utility_functions.database_manager import DatabaseManager
 from src.family_album.utility_functions.database_settings import DatabaseSettings

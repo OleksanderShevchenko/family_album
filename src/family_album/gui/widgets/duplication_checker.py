@@ -6,7 +6,8 @@ import sys
 from os import path
 from PyQt6 import QtWidgets, uic, QtGui
 from PyQt6.QtCore import pyqtSignal, QStringListModel, Qt, QItemSelectionModel
-from PyQt6.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu, QAction, QListView
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu, QListView
 
 from src.family_album.utility_functions.image_utils import is_image_file
 from src.family_album_lib.duplicate_file_analyser import DuplicateFileAnalyser

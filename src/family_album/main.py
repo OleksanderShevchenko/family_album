@@ -5,6 +5,13 @@ __license__ = """Mit license"""
 
 import sys
 import time
+import os
+
+# Ensure project root is on sys.path so 'src' package is importable when run directly
+_this_dir = os.path.dirname(__file__)
+_project_root = os.path.abspath(os.path.join(_this_dir, os.pardir, os.pardir))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
 from src.family_album.gui.application import create_app, show_splash, run
 

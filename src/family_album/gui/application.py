@@ -42,4 +42,4 @@ def run(name, version):
     if _splash is not None:
         time.sleep(1)
         _splash.finish(window)
-    sys.exit(_app.exec_())
+    sys.exit(_app.exec())

@@ -35,7 +35,7 @@ class DuplicationChecker(QtWidgets.QWidget):
         self.lst_duplications.setModel(QStringListModel([]))
         self.lst_original_files.selectionModel().currentChanged.connect(self.evt_original_file_selected)
         self.lst_duplications.selectionModel().currentChanged.connect(self.evt_duplicated_file_selected)
-        self.lst_duplications.setContextMenuPolicy(Qt.CustomContextMenu)  # Important
+        self.lst_duplications.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)  # Important
         self.lst_duplications.customContextMenuRequested.connect(self.evt_show_context_menu)
         self.pbAnalyze.setEnabled(False)
         self.pbCheckDuplications.setEnabled(False)
@@ -241,7 +241,7 @@ class DuplicationChecker(QtWidgets.QWidget):
     def evt_show_context_menu(self, pos):
         index = self.lst_duplications.indexAt(pos)
         if index.isValid():  # Check if an item is selected
-            item_text = self.lst_duplications.model().data(index, Qt.DisplayRole)  # Get the text
+            item_text = self.lst_duplications.model().data(index, Qt.ItemDataRole.DisplayRole)  # Get the text
 
             menu = QMenu(self)
             # Example actions:
@@ -249,7 +249,7 @@ class DuplicationChecker(QtWidgets.QWidget):
             open_action.triggered.connect(lambda: self._set_original(item_text))  # Pass the index
             menu.addAction(open_action)
 
-            menu.exec_(self.lst_duplications.viewport().mapToGlobal(pos))  # Show the menu at the cursor position
+            menu.exec(self.lst_duplications.viewport().mapToGlobal(pos))  # Show the menu at the cursor position
 
     def _set_original(self, duplicate_file: str) -> None:
         selected_original_indexes = self.lst_original_files.selectionModel().selectedIndexes()
@@ -257,7 +257,7 @@ class DuplicationChecker(QtWidgets.QWidget):
         if selected_original_indexes:
             # Get the first selected index (assuming single selection mode)
             selected_index = selected_original_indexes[0]
-            original_file = self.lst_original_files.model().data(selected_index, Qt.DisplayRole)
+            original_file = self.lst_original_files.model().data(selected_index, Qt.ItemDataRole.DisplayRole)
             self.__switch_original_with_duplicate(original_file, duplicate_file)
             self.__populate_files()
             self.__select_new_row(self.lst_original_files, duplicate_file)
@@ -290,7 +290,7 @@ class DuplicationChecker(QtWidgets.QWidget):
 
         for row in range(model.rowCount()):
             index = model.index(row, 0)  # Assuming single-column list
-            item_text = model.data(index, Qt.DisplayRole)
+            item_text = model.data(index, Qt.ItemDataRole.DisplayRole)
 
             if item_text == target_text:
                 selection_model = list_widget.selectionModel()
@@ -303,7 +303,7 @@ class DuplicationChecker(QtWidgets.QWidget):
             resolution = f"{pix_map.width()} x {pix_map.height()}"
             w: int = min(label.maximumWidth(), pix_map.width())
             h: int = min(label.maximumHeight(), pix_map.height())
-            pix_map.scaled(w, h, Qt.KeepAspectRatio)
+            pix_map = pix_map.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio)
             label.setPixmap(pix_map)
             label.setScaledContents(True)
             label.show()
@@ -325,4 +325,4 @@ if __name__ == "__main__":
     layout1.addWidget(dir_viewer)
     dialog.setLayout(layout1)
     dialog.show()
-    _app.exec_()
+    _app.exec()

@@ -12,26 +12,26 @@ class DataFrameModel(QtCore.QAbstractTableModel):
         self.__dataframe = df
 
     def headerData(self, section: int, orientation: QtCore.Qt.Orientation,
-                   role: int = QtCore.Qt.DisplayRole):
-        if role != QtCore.Qt.DisplayRole:
-            return QtCore.QVariant()
-        if orientation == QtCore.Qt.Horizontal:
+                   role: int = QtCore.Qt.ItemDataRole.DisplayRole):
+        if role != QtCore.Qt.ItemDataRole.DisplayRole:
+            return None
+        if orientation == QtCore.Qt.Orientation.Horizontal:
             try:
                 return self.__dataframe.columns.tolist()[section]
             except (IndexError):
-                return QtCore.QVariant()
-        elif orientation == QtCore.Qt.Vertical:
+                return None
+        elif orientation == QtCore.Qt.Orientation.Vertical:
             try:
                 return self.__dataframe.index.tolist()[section]
             except (IndexError):
-                return QtCore.QVariant()
+                return None
 
-    def data(self, index: QModelIndex, role: int = QtCore.Qt.DisplayRole):
-        if role != QtCore.Qt.DisplayRole:
-            return QtCore.QVariant()
+    def data(self, index: QModelIndex, role: int = QtCore.Qt.ItemDataRole.DisplayRole):
+        if role != QtCore.Qt.ItemDataRole.DisplayRole:
+            return None
         if not index.isValid():
-            return QtCore.QVariant()
-        return QtCore.QVariant(str(self.__dataframe.iloc[index.row(), index.column()]))
+            return None
+        return str(self.__dataframe.iloc[index.row(), index.column()])
 
     def setData(self, index: QModelIndex, value: Any, role: int) -> bool:
         row = self.__dataframe.index[index.row()]
@@ -42,7 +42,7 @@ class DataFrameModel(QtCore.QAbstractTableModel):
             dtype = self.__dataframe[col].dtype
             if dtype != object:
                 value = None if value == '' else dtype.type(value)
-        self.__dataframe.set_value(row, col, value)
+        self.__dataframe.at[row, col] = value
         return True
 
     def rowCount(self, parent=QtCore.QModelIndex()):
@@ -54,6 +54,6 @@ class DataFrameModel(QtCore.QAbstractTableModel):
     def sort(self, column: int, order: int):
         column_name = self.__dataframe.columns.tolist()[column]
         self.layoutAboutToBeChanged.emit()
-        self.__dataframe.sort_values(column_name, ascending=order == QtCore.Qt.AscendingOrder, inplace=True)
+        self.__dataframe.sort_values(column_name, ascending=order == QtCore.Qt.SortOrder.AscendingOrder, inplace=True)
         self.__dataframe.reset_index(inplace=True, drop=True)
         self.layoutChanged.emit()

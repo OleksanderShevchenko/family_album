@@ -68,8 +68,8 @@ class FileOrganizer(QtWidgets.QWidget):
         msg = QMessageBox(self)
         msg.setWindowTitle("Files organizer")
         msg.setText(message)
-        msg.setIcon(QMessageBox.Warning)
-        msg.exec_()
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.exec()
 
     def evt_analyze_selected(self):
         try:
@@ -114,4 +114,4 @@ if __name__ == "__main__":
     layout1.addWidget(dir_viewer)
     dialog.setLayout(layout1)
     dialog.show()
-    _app.exec_()
+    _app.exec()

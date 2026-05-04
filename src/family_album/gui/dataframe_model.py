@@ -1,8 +1,8 @@
 from typing import Any
 
 import pandas as pd
-from PyQt5 import QtCore
-from PyQt5.QtCore import QModelIndex
+from PyQt6 import QtCore
+from PyQt6.QtCore import QModelIndex
 from pandas import DataFrame
 
 
@@ -12,22 +12,22 @@ class DataFrameModel(QtCore.QAbstractTableModel):
         self.__dataframe = df
 
     def headerData(self, section: int, orientation: QtCore.Qt.Orientation,
-                   role: int = QtCore.Qt.DisplayRole):
-        if role != QtCore.Qt.DisplayRole:
+                   role: int = QtCore.Qt.ItemDataRole.DisplayRole):
+        if role != QtCore.Qt.ItemDataRole.DisplayRole:
             return QtCore.QVariant()
-        if orientation == QtCore.Qt.Horizontal:
+        if orientation == QtCore.Qt.Orientation.Horizontal:
             try:
                 return self.__dataframe.columns.tolist()[section]
             except (IndexError):
                 return QtCore.QVariant()
-        elif orientation == QtCore.Qt.Vertical:
+        elif orientation == QtCore.Qt.Orientation.Vertical:
             try:
                 return self.__dataframe.index.tolist()[section]
             except (IndexError):
                 return QtCore.QVariant()
 
-    def data(self, index: QModelIndex, role: int = QtCore.Qt.DisplayRole):
-        if role != QtCore.Qt.DisplayRole:
+    def data(self, index: QModelIndex, role: int = QtCore.Qt.ItemDataRole.DisplayRole):
+        if role != QtCore.Qt.ItemDataRole.DisplayRole:
             return QtCore.QVariant()
         if not index.isValid():
             return QtCore.QVariant()

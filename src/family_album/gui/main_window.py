@@ -4,28 +4,28 @@ __contact__ = "oleksander.shevchenko777@gmail.com"
 __version__ = "0.1"
 __license__ = """MIT Licence"""
 
-import logging
 import os
 import time
 
-from PyQt5 import uic, QtWidgets
-from PyQt5.QtWidgets import QMainWindow, QVBoxLayout
+from PyQt6 import uic, QtWidgets
+from PyQt6.QtWidgets import QMainWindow, QVBoxLayout
 
-# from .plot_canvas import PlotCanvas
 from src.family_album.gui.widgets.directory_view import DirectoryView
 from src.family_album.gui.widgets.duplication_checker import DuplicationChecker
 from src.family_album.gui.widgets.file_organizer import FileOrganizer
+from src.family_album.gui.py_ui.main_window import Ui_FamilyAlbumUI
 from src.family_album_lib.create_logger import CustomLogger
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
 
     def __init__(self, name: str, version: str):
         super().__init__()
         self._logger = CustomLogger(name, version)
         self._logger.log_debug("\n***** Start new session *****\n")
         try:
-            self.window = uic.loadUi(os.path.dirname(__file__) + '/py_ui/main_window.ui', self)
+            self.setupUi(self)
+            # self.window = uic.loadUi(os.path.dirname(__file__) + '/py_ui/main_window.ui', self)
             self.title = name + ' v.' + version
             self._interval = 10_000  # msec interval for show message in status bar
             self.setWindowTitle(self.title)

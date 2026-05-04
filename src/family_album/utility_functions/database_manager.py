@@ -1,4 +1,4 @@
-from PyQt5.QtSql import QSqlDatabase, QSqlQuery, QSqlTableModel
+from PyQt6.QtSql import QSqlDatabase, QSqlQuery, QSqlTableModel
 
 from src.family_album.utility_functions.database_settings import DatabaseSettings
 

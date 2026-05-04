@@ -1,19 +1,20 @@
 import os.path
 import sys
 from os import path
-from PyQt5 import QtWidgets, uic
-from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtGui import QStandardItemModel
-from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox
+from PyQt6 import QtWidgets, uic
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QStandardItemModel
+from PyQt6.QtWidgets import QVBoxLayout, QDialog, QMessageBox
 
 from src.family_album.gui.dataframe_model import DataFrameModel
+from src.family_album.gui.widgets.py_ui.file_organizer_ui import Ui_Form
 from src.family_album.utility_functions.analyze_directory import analyze_directory
 from src.family_album.utility_functions.database_manager import DatabaseManager
 from src.family_album.utility_functions.database_settings import DatabaseSettings
 from src.family_album.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
 
 
-class FileOrganizer(QtWidgets.QWidget):
+class FileOrganizer(QtWidgets.QWidget, Ui_Form):
     _DB_FOLDER = 'data'
     _DB_FILE = 'my_album.db'
 
@@ -21,7 +22,8 @@ class FileOrganizer(QtWidgets.QWidget):
 
     def __init__(self, parent):
         super(FileOrganizer, self).__init__(parent)
-        uic.loadUi(path.dirname(__file__) + '/py_ui/file_organizer_ui.ui', self)
+        self.setupUi(self)
+        # uic.loadUi(path.dirname(__file__) + '/py_ui/file_organizer_ui.ui', self)
         self._selected_path: str = ""
         self.lbl_folder_selected.setText("<>")
         self.lbl_info.setText("<>")

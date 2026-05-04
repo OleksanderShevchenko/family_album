@@ -1,18 +1,21 @@
 import sys
 from os import path
-from PyQt5 import QtWidgets, uic, QtCore, QtGui
-from PyQt5.QtCore import QDir, pyqtSignal
-from PyQt5.QtWidgets import QFileSystemModel, QTreeView, QVBoxLayout, QHBoxLayout, QDialog
+from PyQt6 import QtWidgets, uic, QtCore, QtGui
+from PyQt6.QtCore import QDir, pyqtSignal
+from PyQt6.QtWidgets import QTreeView, QVBoxLayout, QHBoxLayout, QDialog
+
+from src.family_album.gui.widgets.py_ui.directory_view import Ui_Form
 
 
-class DirectoryView(QtWidgets.QWidget):
+class DirectoryView(QtWidgets.QWidget, Ui_Form):
     ItemSelected = pyqtSignal(str)
 
     def __init__(self, parent):
         super(DirectoryView, self).__init__(parent)
-        uic.loadUi(path.dirname(__file__) + '/py_ui/directory_view.ui', self)
+        self.setupUi(self)
+        # uic.loadUi(path.dirname(__file__) + '/py_ui/directory_view.ui', self)
 
-        self.dir_model = QFileSystemModel()
+        self.dir_model = QtGui.QFileSystemModel()
         self.dir_model.setFilter(QDir.AllDirs | QDir.NoDotAndDotDot)
         self.dir_model.setRootPath(self.dir_model.myComputer())
         self.indexRoot = self.dir_model.index(self.dir_model.rootPath())

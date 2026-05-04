@@ -4,21 +4,23 @@ import os.path
 import shutil
 import sys
 from os import path
-from PyQt5 import QtWidgets, uic, QtGui
-from PyQt5.QtCore import pyqtSignal, QStringListModel, Qt, QItemSelectionModel
-from PyQt5.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu, QAction, QListView
+from PyQt6 import QtWidgets, uic, QtGui
+from PyQt6.QtCore import pyqtSignal, QStringListModel, Qt, QItemSelectionModel
+from PyQt6.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu, QListView
 
+from src.family_album.gui.widgets.py_ui.duplication_checker_ui import Ui_Form
 from src.family_album.utility_functions.image_utils import is_image_file
 from src.family_album_lib.duplicate_file_analyser import DuplicateFileAnalyser
 
 
-class DuplicationChecker(QtWidgets.QWidget):
+class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
     ItemSelected = pyqtSignal(str)
 
     def __init__(self, parent):
         self._parent: QMainWindow = parent
         super(DuplicationChecker, self).__init__(parent)
-        uic.loadUi(path.dirname(__file__) + '/py_ui/duplication_checker_ui.ui', self)
+        self.setupUi(self)
+        # uic.loadUi(path.dirname(__file__) + '/py_ui/duplication_checker_ui.ui', self)
         self._selected_path: str = ""
         self.files_hash: dict = {}
         self.duplications: dict = {}
@@ -244,7 +246,7 @@ class DuplicationChecker(QtWidgets.QWidget):
 
             menu = QMenu(self)
             # Example actions:
-            open_action = QAction("Set original", self)
+            open_action = QtGui.QAction("Set original", self)
             open_action.triggered.connect(lambda: self._set_original(item_text))  # Pass the index
             menu.addAction(open_action)
 

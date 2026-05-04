@@ -12,6 +12,7 @@ from src.family_album.utility_functions.analyze_directory import analyze_directo
 from src.family_album.utility_functions.database_manager import DatabaseManager
 from src.family_album.utility_functions.database_settings import DatabaseSettings
 from src.family_album.utility_functions.get_files_and_subdirs_count import get_files_and_subdirs_count
+from src.family_album.utility_functions.organize_media import organize_directory_by_year_month
 
 
 class FileOrganizer(QtWidgets.QWidget, Ui_Form):
@@ -57,12 +58,20 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
 
     def evt_organize_files(self):
         try:
-            ...
+            if not os.path.isdir(self._selected_path):
+                self.__show_message("Select a valid folder first")
+                return
+            self.pb_organize.setEnabled(False)
+            stats = organize_directory_by_year_month(self._selected_path)
+            summary = (f"Processed: {stats.total_processed}, Moved: {stats.moved}, "
+                       f"Skipped: {stats.skipped}, Errors: {stats.errors}")
+            self.lbl_info.setText(summary)
+            self.ItemSelected.emit(summary)
+            if stats.errors:
+                self.__show_message("Some files failed to organize. Check console for details.")
         except Exception as err:
             print(f"Error occur: {err}")
             self.__show_message(f"Error occur: {err}")
-            self.pbDumpDuplications.setEnabled(False)
-            self.pbMove.setEnabled(False)
         finally:
             self.pb_organize.setEnabled(True)
 
@@ -70,8 +79,8 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         msg = QMessageBox(self)
         msg.setWindowTitle("Files organizer")
         msg.setText(message)
-        msg.setIcon(QMessageBox.Warning)
-        msg.exec_()
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.exec()
 
     def evt_analyze_selected(self):
         try:
@@ -116,4 +125,4 @@ if __name__ == "__main__":
     layout1.addWidget(dir_viewer)
     dialog.setLayout(layout1)
     dialog.show()
-    _app.exec_()
+    _app.exec()

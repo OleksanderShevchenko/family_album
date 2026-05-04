@@ -9,6 +9,7 @@ from PyQt6.QtCore import pyqtSignal, QStringListModel, Qt, QItemSelectionModel
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu, QListView
 
+from family_album.gui.widgets.py_ui.directory_view import Ui_Form
 from src.family_album.utility_functions.image_utils import is_image_file
 from src.family_album_lib.duplicate_file_analyser import DuplicateFileAnalyser
 

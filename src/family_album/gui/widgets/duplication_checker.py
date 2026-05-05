@@ -9,7 +9,7 @@ from PyQt6.QtCore import pyqtSignal, QStringListModel, Qt, QItemSelectionModel
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu, QListView
 
-from family_album.gui.widgets.py_ui.directory_view import Ui_Form
+from family_album.gui.widgets.py_ui.duplication_checker_ui import Ui_Form
 from src.family_album.utility_functions.image_utils import is_image_file
 from src.family_album_lib.duplicate_file_analyser import DuplicateFileAnalyser
 
@@ -18,8 +18,8 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
     ItemSelected = pyqtSignal(str)
 
     def __init__(self, parent):
+        super().__init__(parent)
         self._parent: QMainWindow = parent
-        super(DuplicationChecker, self).__init__(parent)
         self.setupUi(self)
         # uic.loadUi(path.dirname(__file__) + '/py_ui/duplication_checker_ui.ui', self)
         self._selected_path: str = ""

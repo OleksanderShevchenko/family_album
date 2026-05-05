@@ -22,7 +22,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
     ItemSelected = pyqtSignal(str)
 
     def __init__(self, parent):
-        super(FileOrganizer, self).__init__(parent)
+        super().__init__(parent)
         self.setupUi(self)
         # uic.loadUi(path.dirname(__file__) + '/py_ui/file_organizer_ui.ui', self)
         self._selected_path: str = ""

@@ -15,7 +15,7 @@ class DirectoryView(QtWidgets.QWidget, Ui_Form):
     ItemSelected = pyqtSignal(str)
 
     def __init__(self, parent):
-        super(DirectoryView, self).__init__(parent)
+        super().__init__(parent)
         self.setupUi(self)
         # uic.loadUi(path.dirname(__file__) + '/py_ui/directory_view.ui', self)
 

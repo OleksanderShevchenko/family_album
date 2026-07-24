@@ -48,8 +48,8 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             layout3.addWidget(self.file_organizer)
             self.organazing_space.setLayout(layout3)
 
-            self.main_splitter.setStretchFactor(0, 33)
-            self.main_splitter.setStretchFactor(1, 67)
+            self.splitter.setStretchFactor(0, 33)
+            self.splitter.setStretchFactor(1, 67)
             # add progress bar in status bar
             self.progressBar = QtWidgets.QProgressBar()
             self.statusBar().addPermanentWidget(self.progressBar)

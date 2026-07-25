@@ -10,20 +10,20 @@ from src.family_album.utility_functions.find_duplicate_files_multythreaded impor
 class TestImageUtils(unittest.TestCase):
 
     def setUp(self):
-        self._data_path = os.path.abspath('./data/duplication_check/')
+        self._data_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'data', 'duplication_check'))
         self._expected_duplications = {
-            'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_16 - Copy.jpg': [
-                'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_16.jpg'],
-            'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_21 - Copy.jpg': [
-                'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_21.jpg'],
-            'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_3 - Copy.jpg': [
-                'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_3.jpg'],
-            'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_33 - Copy.jpg': [
-                'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_33.jpg'],
-            'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_37 - Copy.jpg': [
-                'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_37.jpg'],
-            'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_44 - Copy.jpg': [
-                'D:\\Shevchenko\\PetProjects\\family_album\\tests\\data\\duplication_check\\test_image_44.jpg']}
+            os.path.join(self._data_path, 'test_image_16 - Copy.jpg'): [
+                os.path.join(self._data_path, 'test_image_16.jpg')],
+            os.path.join(self._data_path, 'test_image_21 - Copy.jpg'): [
+                os.path.join(self._data_path, 'test_image_21.jpg')],
+            os.path.join(self._data_path, 'test_image_3 - Copy.jpg'): [
+                os.path.join(self._data_path, 'test_image_3.jpg')],
+            os.path.join(self._data_path, 'test_image_33 - Copy.jpg'): [
+                os.path.join(self._data_path, 'test_image_33.jpg')],
+            os.path.join(self._data_path, 'test_image_37 - Copy.jpg'): [
+                os.path.join(self._data_path, 'test_image_37.jpg')],
+            os.path.join(self._data_path, 'test_image_44 - Copy.jpg'): [
+                os.path.join(self._data_path, 'test_image_44.jpg')]}
 
     def test_find_duplicate_files(self):
         result = find_duplicate_files(self._data_path)

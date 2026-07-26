@@ -22,9 +22,9 @@ class DuplicateFileAnalyser():
         self.__files_analysed: int = 0
         self.__progress: int = 0
         self.__num_of_threads = instantly_opened_files
-        self.start_analysis: Callable = start_analysis
-        self.update_progress: Callable = update_analysis
-        self.log_event: Callable = log_event
+        self._start_analysis: Callable = start_analysis
+        self._update_progress: Callable = update_analysis
+        self._log_event: Callable = log_event
 
     @property
     def directory(self) -> str:
@@ -65,8 +65,8 @@ class DuplicateFileAnalyser():
         self.__files_analysed = 0
         self.__progress = 0
         total_files = self._directory_analyser.files_count_in_directory
-        if isinstance(self.start_analysis, Callable):
-            self.start_analysis("Start analysis.")
+        if isinstance(self._start_analysis, Callable):
+            self._start_analysis("Start analysis.")
         lock = Lock()  # use lock to avoid simultaneous edit dictionary 'file_hashes' from several threads
 
         def _get_files_hash(file_name: str) -> None:
@@ -75,31 +75,40 @@ class DuplicateFileAnalyser():
             """
             if not os.path.isfile(file_name):
                 return
+            filehash = None
             try:
                 with open(file_name, 'rb') as file:
-                    filehash = hashlib.blake2b(file.read()).hexdigest()
+                    if not file.readable():
+                        m = f"Can not reading file {file_name}"
+                        if isinstance(self._log_event, Callable):
+                            self._log_event(m)
+                        print(m)
+                        return
+                    file_data = file.read()
+                    filehash = hashlib.blake2b(file_data).hexdigest()
             except Exception as e:
                 m = f"Error reading file {file_name}: {e}"
-                if isinstance(self.log_event, Callable):
-                    self.log_event(m)
+                if isinstance(self._log_event, Callable):
+                    self._log_event(m)
                 print(m)
                 return
             else:
-                with lock:  # context manager will release lock automatically even in case of an error
-                    # add hash and file name to dictionary
-                    if filehash in self.__files_hashes.keys() and file_name not in self.__files_hashes[filehash]:
-                        self.__files_hashes[filehash].append(file_name)
-                    else:
-                        self.__files_hashes[filehash] = [file_name]
-                self.__files_analysed += 1
-                current_progress = int(self.__files_analysed / total_files * 100)
-                if current_progress > self.__progress:
-                    self.__progress = current_progress
-                    if isinstance(self.update_progress, Callable):
-                        self.update_progress(self.__files_analysed, total_files)
+                if filehash:  # if hash not none
+                    with lock:  # context manager will release lock automatically even in case of an error
+                        # add hash and file name to dictionary
+                        if filehash in self.__files_hashes.keys() and file_name not in self.__files_hashes[filehash]:
+                            self.__files_hashes[filehash].append(file_name)
+                        else:
+                            self.__files_hashes[filehash] = [file_name]
+                    self.__files_analysed += 1
+                    current_progress = int(self.__files_analysed / total_files * 100)
+                    if current_progress > self.__progress:
+                        self.__progress = current_progress
+                        if isinstance(self._update_progress, Callable):
+                            self._update_progress(self.__files_analysed, total_files)
 
-        # create thread pool with max threads of _NUM_OPEN_FILES which limits
-        with ThreadPoolExecutor(max_workers=self._NUM_OPEN_FILES) as executor:
+        # create thread pool with max threads of self.__num_of_threads which limits
+        with ThreadPoolExecutor(max_workers=self.__num_of_threads) as executor:
             futures = []
             # iterate through all files and subdirectories
             for dirpath, _, file_names in os.walk(self.directory):

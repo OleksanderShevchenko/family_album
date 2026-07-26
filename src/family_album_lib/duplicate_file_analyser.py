@@ -10,16 +10,21 @@ from src.family_album_lib.directory_analyser import DirectoryAnalyser
 
 class DuplicateFileAnalyser():
 
-    def __init__(self, directory: str, instantly_opened_files: int = 0) -> None:
+    def __init__(self,
+                 directory: str,
+                 start_analysis: Callable,
+                 update_analysis: Callable,
+                 log_event: Callable,
+                 instantly_opened_files: int = 0) -> None:
         super().__init__()
         self._directory_analyser: DirectoryAnalyser = DirectoryAnalyser(directory)
         self.__files_hashes: Dict[str, List[str]] = {}
         self.__files_analysed: int = 0
         self.__progress: int = 0
         self.__num_of_threads = instantly_opened_files
-        self.start_analysis: Callable = None
-        self.update_progress: Callable = None
-        self.log_event: Callable = None
+        self.start_analysis: Callable = start_analysis
+        self.update_progress: Callable = update_analysis
+        self.log_event: Callable = log_event
 
     @property
     def directory(self) -> str:

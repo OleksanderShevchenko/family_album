@@ -113,7 +113,7 @@ class DuplicateFileAnalyser():
             # iterate through all files and subdirectories
             for dirpath, _, file_names in os.walk(self.directory):
                 for filename in file_names:
-                    full_file_name = os.path.join(dirpath, filename)
+                    full_file_name = os.path.normpath(os.path.join(dirpath, filename))
                     futures.append(executor.submit(_get_files_hash, full_file_name))
 
             for future in as_completed(futures):

@@ -17,8 +17,21 @@ class DuplicateFileAnalyser():
                  log_event: Callable,
                  instantly_opened_files: int) -> None:
         super().__init__()
+        # if directory is not consistent it raises NotADirectoryError error
         self._directory_analyser: DirectoryAnalyser = DirectoryAnalyser(directory)
+        # check for argument correctness
+        if instantly_opened_files <= 0:
+            raise ValueError(f"Number of instantly opened files shall be positive int higher than zero! " +
+                             f"Passed value '{instantly_opened_files}' is inconsistent.")
+        if start_analysis is not None and not isinstance(start_analysis, Callable) :
+            raise TypeError(f"Argument 'start_analysis' is not callable.")
+        if update_analysis is not None and not isinstance(update_analysis, Callable):
+            raise TypeError(f"Argument 'update_analysis' is not callable.")
+        if log_event is not None and not isinstance(log_event, Callable):
+            raise TypeError(f"Argument 'log_event' is not callable.")
+
         self.__files_hashes: Dict[str, List[str]] = {}
+        self.__failed_files: List[str] = []
         self.__files_analysed: int = 0
         self.__progress: int = 0
         self.__num_of_threads: int = instantly_opened_files
@@ -34,6 +47,7 @@ class DuplicateFileAnalyser():
     def directory(self, new_directory: str) -> None:
         self._directory_analyser.directory = new_directory
         self.__files_hashes = {}
+        self.__failed_files = []
         self.__files_analysed = 0
 
     @property
@@ -55,6 +69,10 @@ class DuplicateFileAnalyser():
         else:
             return {}
 
+    @property
+    def failed_files(self) -> List[str]:
+        return self.__failed_files
+
     def start_analysis_thread(self):
         self._find_duplicate_files_multithreaded()
 
@@ -65,8 +83,7 @@ class DuplicateFileAnalyser():
         self.__files_analysed = 0
         self.__progress = 0
         total_files = self._directory_analyser.files_count_in_directory
-        if isinstance(self._start_analysis, Callable):
-            self._start_analysis("Start analysis.")
+        self._start_analysis("Start analysis.")
         lock = Lock()  # use lock to avoid simultaneous edit dictionary 'file_hashes' from several threads
 
         def _get_files_hash(file_name: str) -> None:
@@ -80,17 +97,23 @@ class DuplicateFileAnalyser():
                 with open(file_name, 'rb') as file:
                     if not file.readable():
                         m = f"Could not reading file '{file_name}'"
-                        if isinstance(self._log_event, Callable):
-                            self._log_event(m)
+                        self._log_event(m)
                         print(m)
+                        with lock:
+                            self.__failed_files.append(file_name)  # add failed file to list of failed
+                            self.__files_analysed += 1  # assume file processed - to reach 100% in progress
+                            self._recalculate_and_update_progress(total_files)
                         return
                     file_data = file.read()
                     filehash = hashlib.blake2b(file_data).hexdigest()
             except Exception as e:
                 m = f"Error reading file {file_name}: {e}"
-                if isinstance(self._log_event, Callable):
-                    self._log_event(m)
+                self._log_event(m)
                 print(m)
+                with lock:
+                    self.__failed_files.append(file_name)  # add failed file to list of failed
+                    self.__files_analysed += 1  # assume file processed - to reach 100% in progress
+                    self._recalculate_and_update_progress(total_files)
                 return
             else:
                 if filehash:  # if hash not none
@@ -100,12 +123,8 @@ class DuplicateFileAnalyser():
                             self.__files_hashes[filehash].append(file_name)
                         else:
                             self.__files_hashes[filehash] = [file_name]
-                    self.__files_analysed += 1
-                    current_progress = int(self.__files_analysed / total_files * 100)
-                    if current_progress > self.__progress:
-                        self.__progress = current_progress
-                        if isinstance(self._update_progress, Callable):
-                            self._update_progress(self.__files_analysed, total_files)
+                        self.__files_analysed += 1
+                        self._recalculate_and_update_progress(total_files)
 
         # create thread pool with max threads of self.__num_of_threads which limits
         with ThreadPoolExecutor(max_workers=self.__num_of_threads) as executor:
@@ -119,3 +138,9 @@ class DuplicateFileAnalyser():
             for future in as_completed(futures):
                 future.result()  # wait for all threads to complete
         return
+
+    def _recalculate_and_update_progress(self, total_files: int) -> None:
+        current_progress = int(self.__files_analysed / total_files * 100)
+        if current_progress > self.__progress:
+            self.__progress = current_progress
+            self._update_progress(self.__files_analysed, total_files)

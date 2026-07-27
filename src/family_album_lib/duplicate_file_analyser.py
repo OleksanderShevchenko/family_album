@@ -15,13 +15,13 @@ class DuplicateFileAnalyser():
                  start_analysis: Callable,
                  update_analysis: Callable,
                  log_event: Callable,
-                 instantly_opened_files: int = 0) -> None:
+                 instantly_opened_files: int) -> None:
         super().__init__()
         self._directory_analyser: DirectoryAnalyser = DirectoryAnalyser(directory)
         self.__files_hashes: Dict[str, List[str]] = {}
         self.__files_analysed: int = 0
         self.__progress: int = 0
-        self.__num_of_threads = instantly_opened_files
+        self.__num_of_threads: int = instantly_opened_files
         self._start_analysis: Callable = start_analysis
         self._update_progress: Callable = update_analysis
         self._log_event: Callable = log_event

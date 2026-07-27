@@ -22,10 +22,10 @@ class ResumableDuplicateAnalyser:
 
     def __init__(self,
                  directory: str,
-                 start_analysis: Callable,
-                 update_analysis: Callable,
-                 log_event: Callable,
-                 finish_analysis: Callable,
+                 start_analysis: Optional[Callable] = None,
+                 update_analysis: Optional[Callable] = None,
+                 log_event: Optional[Callable] = None,
+                 finish_analysis: Optional[Callable] = None,
                  instantly_opened_files: int = 0) -> None:
         norm_dir = os.path.normpath(directory)
         if instantly_opened_files <= 0:
@@ -42,10 +42,10 @@ class ResumableDuplicateAnalyser:
         self._stop_event = Event()
         self._worker_thread: Optional[Thread] = None
 
-        self.start_analysis: Callable = start_analysis
-        self.update_progress: Callable = update_analysis
-        self.log_event: Callable = log_event
-        self.finish_analysis: Callable = finish_analysis
+        self.start_analysis: Optional[Callable] = start_analysis
+        self.update_progress: Optional[Callable] = update_analysis
+        self.log_event: Optional[Callable] = log_event
+        self.finish_analysis: Optional[Callable] = finish_analysis
 
     @property
     def directory(self) -> str:

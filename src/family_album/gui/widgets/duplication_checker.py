@@ -2,6 +2,7 @@ import json
 import os.path
 import shutil
 import sys
+from typing import Optional
 
 from PyQt6 import QtWidgets, uic, QtGui
 from PyQt6.QtCore import pyqtSignal, QStringListModel, Qt, QItemSelectionModel
@@ -73,7 +74,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
         self.lst_duplications.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.lst_duplications.customContextMenuRequested.connect(self.evt_show_context_menu)
 
-        self._duplication_checker: ResumableDuplicateAnalyser = None
+        self._duplication_checker: Optional[ResumableDuplicateAnalyser] = None
         self._update_button_states()
 
     @property
@@ -374,8 +375,8 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
                         i = 1
                         while os.path.isfile(target_file):
                             dir_name = os.path.dirname(target_file)
-                            file_name, extention = os.path.splitext(os.path.basename(target_file))
-                            target_file = os.path.join(dir_name, f"{file_name}_copy{i}{extention}")
+                            file_name, extension = os.path.splitext(os.path.basename(target_file))
+                            target_file = os.path.join(dir_name, f"{file_name}_copy{i}{extension}")
                             i += 1
                     try:
                         shutil.move(file, target_file)

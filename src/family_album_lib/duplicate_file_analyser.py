@@ -83,7 +83,8 @@ class DuplicateFileAnalyser():
         self.__files_analysed = 0
         self.__progress = 0
         total_files = self._directory_analyser.files_count_in_directory
-        self._start_analysis("Start analysis.")
+        if isinstance(self._start_analysis, Callable):
+            self._start_analysis("Start analysis.")
         lock = Lock()  # use lock to avoid simultaneous edit dictionary 'file_hashes' from several threads
 
         def _get_files_hash(file_name: str) -> None:
@@ -97,7 +98,8 @@ class DuplicateFileAnalyser():
                 with open(file_name, 'rb') as file:
                     if not file.readable():
                         m = f"Could not reading file '{file_name}'"
-                        self._log_event(m)
+                        if isinstance(self._log_event, Callable):
+                            self._log_event(m)
                         print(m)
                         with lock:
                             self.__failed_files.append(file_name)  # add failed file to list of failed
@@ -108,7 +110,8 @@ class DuplicateFileAnalyser():
                     filehash = hashlib.blake2b(file_data).hexdigest()
             except Exception as e:
                 m = f"Error reading file {file_name}: {e}"
-                self._log_event(m)
+                if isinstance(self._log_event, Callable):
+                    self._log_event(m)
                 print(m)
                 with lock:
                     self.__failed_files.append(file_name)  # add failed file to list of failed
@@ -143,4 +146,5 @@ class DuplicateFileAnalyser():
         current_progress = int(self.__files_analysed / total_files * 100)
         if current_progress > self.__progress:
             self.__progress = current_progress
-            self._update_progress(self.__files_analysed, total_files)
+            if isinstance(self._update_progress, Callable):
+                self._update_progress(self.__files_analysed, total_files)

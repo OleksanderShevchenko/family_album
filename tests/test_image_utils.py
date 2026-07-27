@@ -27,7 +27,7 @@ class TestImageUtils(unittest.TestCase):
                            'test_photo2.jpg': 0,
                            'test_photo3.jpg': 58,
                            'test_photo4.jpg': 58,
-                           'test.jpg': 56}
+                           'test.jpg': 108}  # the only file that has got MakerNote IFD metadata
 
     def test_is_image(self):
         for dir_name, _, files in os.walk(self._data_path):

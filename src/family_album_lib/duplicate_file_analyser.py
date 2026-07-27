@@ -79,7 +79,7 @@ class DuplicateFileAnalyser():
             try:
                 with open(file_name, 'rb') as file:
                     if not file.readable():
-                        m = f"Can not reading file {file_name}"
+                        m = f"Could not reading file '{file_name}'"
                         if isinstance(self._log_event, Callable):
                             self._log_event(m)
                         print(m)

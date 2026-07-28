@@ -77,6 +77,8 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
         self.statusBar().showMessage(message, self._interval)
 
     def evt_start_analysis(self, message: str) -> None:
+        if hasattr(self, 'dir_viewer') and self.dir_viewer:
+            self.dir_viewer.setEnabled(False)
         self.progressBar.setValue(0)
         self.progressBar.setVisible(True)
         self.progressBar.setTextVisible(True)
@@ -98,6 +100,8 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self.evt_finish_analysis("Finish analysis.")
 
     def evt_finish_analysis(self, message: str) -> None:
+        if hasattr(self, 'dir_viewer') and self.dir_viewer:
+            self.dir_viewer.setEnabled(True)
         self.progressBar.setValue(0)
         self.progressBar.setVisible(False)
         self.progressBar.setTextVisible(False)

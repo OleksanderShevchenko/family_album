@@ -77,12 +77,24 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
         self._duplication_checker: Optional[ResumableDuplicateAnalyser] = None
         self._update_button_states()
 
+    def __clear_results(self) -> None:
+        """Clears stored duplication hashes, result lists, and image preview labels."""
+        self.files_hash = {}
+        self.duplications = {}
+        self.lst_original_files.setModel(QStringListModel([]))
+        self.lst_duplications.setModel(QStringListModel([]))
+        self.lblOriginalImage.clear()
+        self.lblOriginalImage.setText("<>")
+        self.lblDuplicatedImage.clear()
+        self.lblDuplicatedImage.setText("<>")
+
     @property
     def selected_path(self) -> str:
         return self._selected_path
 
     @selected_path.setter
     def selected_path(self, new_path: str) -> None:
+        self.__clear_results()
         if os.path.isdir(new_path):
             norm_path = os.path.normpath(new_path)
             self._selected_path = norm_path
@@ -109,10 +121,6 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self.lblInfo.setText("<>")
             self._duplication_checker = None
 
-        self.files_hash = {}
-        self.duplications = {}
-        self.lst_original_files.setModel(QStringListModel([]))
-        self.lst_duplications.setModel(QStringListModel([]))
         self._update_button_states()
 
     def _on_analysis_started(self, msg: str) -> None:
@@ -188,8 +196,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             else:
                 self._save_manager.delete_save(self.selected_path)
 
-        self.files_hash = {}
-        self.duplications = {}
+        self.__clear_results()
         self._duplication_checker.reset()
         try:
             self._update_button_states(is_running=True)
@@ -410,8 +417,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self.ItemSelected.emit(message)
             self.__show_message(message)
             self.LogEventEmitted.emit(message)
-            self.files_hash = {}
-            self.duplications = {}
+            self.__clear_results()
             self._update_button_states()
 
     def evt_show_context_menu(self, pos):

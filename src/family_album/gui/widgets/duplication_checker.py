@@ -136,7 +136,11 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
         has_save = has_path and self._save_manager.has_save(self.selected_path)
         status = self._duplication_checker.status if self._duplication_checker else DuplicationCheckStatus.IDLE
 
-        if is_running or status == DuplicationCheckStatus.RUNNING:
+        is_active = is_running or status == DuplicationCheckStatus.RUNNING
+        if hasattr(self._parent, 'dir_viewer') and self._parent.dir_viewer:
+            self._parent.dir_viewer.setEnabled(not is_active)
+
+        if is_active:
             self.pbAnalyze.setEnabled(False)
             self.pbCheckDuplications.setEnabled(False)
             self.pbStop.setEnabled(True)

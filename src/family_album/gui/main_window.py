@@ -8,8 +8,10 @@ import os
 import time
 
 from PyQt6 import uic, QtWidgets
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import QMainWindow, QVBoxLayout
 
+from src.family_album.gui.dialogs.about_dialog import AboutDialog
 from src.family_album.gui.widgets.directory_view import DirectoryView
 from src.family_album.gui.widgets.duplication_checker import DuplicationChecker
 from src.family_album.gui.widgets.file_organizer import FileOrganizer
@@ -25,10 +27,28 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
         self._logger.log_debug("\n***** Start new session *****\n")
         try:
             self.setupUi(self)
-            # self.window = uic.loadUi(os.path.dirname(__file__) + '/py_ui/main_window.ui', self)
             self.title = name + ' v.' + version
             self._interval = 10_000  # msec interval for show message in status bar
             self.setWindowTitle(self.title)
+
+            # Create Menu Bar with File and Help menus
+            self.menu_bar = self.menuBar()
+
+            # File Menu
+            self.menu_file = self.menu_bar.addMenu("&File")
+            self.action_exit = QAction("&Exit", self)
+            self.action_exit.setShortcut(QKeySequence("Alt+F4"))
+            self.action_exit.setStatusTip("Exit application")
+            self.action_exit.triggered.connect(self.close)
+            self.menu_file.addAction(self.action_exit)
+
+            # Help Menu
+            self.menu_help = self.menu_bar.addMenu("&Help")
+            self.action_about = QAction("&About...", self)
+            self.action_about.setStatusTip("Show information about Family Album and author")
+            self.action_about.triggered.connect(self.evt_show_about_dialog)
+            self.menu_help.addAction(self.action_about)
+
             self.dir_viewer = DirectoryView(self)
             self.dir_viewer.ItemSelected.connect(self.evt_dir_selected)
             self.duplication_checker = DuplicationChecker(self)
@@ -62,6 +82,10 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self.progressBar.setTextVisible(False)
         except Exception as err:
             self._logger.log_error(f"Error on main window initialization: {err}")
+
+    def evt_show_about_dialog(self) -> None:
+        dialog = AboutDialog(self, app_name="Family Album", version=__version__)
+        dialog.exec()
 
     def evt_dir_selected(self, selected_dir: str) -> None:
         if os.path.isdir(selected_dir):

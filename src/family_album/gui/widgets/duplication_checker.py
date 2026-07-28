@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 
 from family_album.gui.widgets.py_ui.duplication_checker_ui import Ui_Form
 from src.family_album.utility_functions.image_utils import is_image_file
+from src.family_album.utility_functions.video_utils import is_file_a_video
 from src.family_album_lib.resumable_duplicate_analyser import ResumableDuplicateAnalyser
 from src.family_album_lib.duplication_memento import (
     DuplicationSaveManager,
@@ -153,6 +154,15 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
         self.horizontalLayout.insertWidget(3, self.pbSaveState)
         self.horizontalLayout.insertWidget(4, self.pbResume)
 
+        # Video player components using OpenCV frame renderer
+        self._videoPlayerOriginal = VideoPlayerWidget(self)
+        self.gridLayout.addWidget(self._videoPlayerOriginal, 3, 0, 1, 1)
+        self._videoPlayerOriginal.setVisible(False)
+
+        self._videoPlayerDuplicated = VideoPlayerWidget(self)
+        self.gridLayout.addWidget(self._videoPlayerDuplicated, 3, 1, 1, 1)
+        self._videoPlayerDuplicated.setVisible(False)
+
         # Connect thread-safe PyQt signals for GUI thread updates
         self.AnalysisStarted.connect(self._on_analysis_started)
         self.ProgressUpdated.connect(self._on_progress_updated)
@@ -180,16 +190,26 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
         self._duplication_checker: Optional[ResumableDuplicateAnalyser] = None
         self._update_button_states()
 
-    def __clear_results(self) -> None:
-        """Clears stored duplication hashes, result lists, and image preview labels."""
+    def clear_results(self) -> None:
+        """Clears stored duplication hashes, result lists, image preview labels, and video players."""
         self.files_hash = {}
         self.duplications = {}
         self.lst_original_files.setModel(QStringListModel([]))
         self.lst_duplications.setModel(QStringListModel([]))
         self.lblOriginalImage.clear()
         self.lblOriginalImage.setText("<>")
+        self.lblOriginalImage.setVisible(True)
         self.lblDuplicatedImage.clear()
         self.lblDuplicatedImage.setText("<>")
+        self.lblDuplicatedImage.setVisible(True)
+
+        if hasattr(self, '_videoPlayerOriginal') and self._videoPlayerOriginal:
+            self._videoPlayerOriginal.stop()
+            self._videoPlayerOriginal.setVisible(False)
+
+        if hasattr(self, '_videoPlayerDuplicated') and self._videoPlayerDuplicated:
+            self._videoPlayerDuplicated.stop()
+            self._videoPlayerDuplicated.setVisible(False)
 
     @property
     def selected_path(self) -> str:
@@ -197,7 +217,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
 
     @selected_path.setter
     def selected_path(self, new_path: str) -> None:
-        self.__clear_results()
+        self.clear_results()
         if os.path.isdir(new_path):
             norm_path = os.path.normpath(new_path)
             self._selected_path = norm_path
@@ -299,7 +319,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             else:
                 self._save_manager.delete_save(self.selected_path)
 
-        self.__clear_results()
+        self.clear_results()
         self._duplication_checker.reset()
         try:
             self._update_button_states(is_running=True)
@@ -437,22 +457,61 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
 
     def evt_original_file_selected(self, current, previous) -> None:
         selected_file = current.data()
+        if not selected_file:
+            return
         duplication_files = self.duplications.get(selected_file, [])
         if selected_file in duplication_files:
             self.__show_message(f"Selected file {selected_file} is duplicated in list of its duplicates!")
         self.lst_duplications.setModel(QStringListModel(duplication_files))
         self.lst_duplications.selectionModel().currentChanged.connect(self.evt_duplicated_file_selected)
+
+        # Reset duplicate preview when selecting new original file
+        self.lblDuplicatedImage.clear()
         self.lblDuplicatedImage.setText("<>")
+        self.lblDuplicatedImage.setVisible(True)
+        if hasattr(self, '_videoPlayerDuplicated'):
+            self._videoPlayerDuplicated.stop()
+            self._videoPlayerDuplicated.setVisible(False)
+
         if is_image_file(selected_file):
+            self.lblOriginalImage.setVisible(True)
+            if hasattr(self, '_videoPlayerOriginal'):
+                self._videoPlayerOriginal.stop()
+                self._videoPlayerOriginal.setVisible(False)
             self.__show_image(self.lblOriginalImage, selected_file, True)
+        elif is_file_a_video(selected_file):
+            self.lblOriginalImage.setVisible(False)
+            if hasattr(self, '_videoPlayerOriginal'):
+                self._videoPlayerOriginal.setVisible(True)
+                self._videoPlayerOriginal.load_video(selected_file)
+            self.ItemSelected.emit(f"Selected video file: {selected_file}")
         else:
+            self.lblOriginalImage.setVisible(True)
+            if hasattr(self, '_videoPlayerOriginal'):
+                self._videoPlayerOriginal.stop()
+                self._videoPlayerOriginal.setVisible(False)
             self.lblOriginalImage.setText("<>")
 
     def evt_duplicated_file_selected(self, current, previous) -> None:
         selected_file = current.data()
+        if not selected_file:
+            return
         if is_image_file(selected_file):
+            self.lblDuplicatedImage.setVisible(True)
+            if hasattr(self, '_videoPlayerDuplicated'):
+                self._videoPlayerDuplicated.stop()
+                self._videoPlayerDuplicated.setVisible(False)
             self.__show_image(self.lblDuplicatedImage, selected_file)
+        elif is_file_a_video(selected_file):
+            self.lblDuplicatedImage.setVisible(False)
+            if hasattr(self, '_videoPlayerDuplicated'):
+                self._videoPlayerDuplicated.setVisible(True)
+                self._videoPlayerDuplicated.load_video(selected_file)
         else:
+            self.lblDuplicatedImage.setVisible(True)
+            if hasattr(self, '_videoPlayerDuplicated'):
+                self._videoPlayerDuplicated.stop()
+                self._videoPlayerDuplicated.setVisible(False)
             self.lblDuplicatedImage.setText("<>")
 
     def evt_dump_duplication(self) -> None:
@@ -489,8 +548,8 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
                         i = 1
                         while os.path.isfile(target_file):
                             dir_name = os.path.dirname(target_file)
-                            file_name, extension = os.path.splitext(os.path.basename(target_file))
-                            target_file = os.path.join(dir_name, f"{file_name}_copy{i}{extension}")
+                            file_name, extention = os.path.splitext(os.path.basename(target_file))
+                            target_file = os.path.join(dir_name, f"{file_name}_copy{i}{extention}")
                             i += 1
                     try:
                         shutil.move(file, target_file)
@@ -520,7 +579,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self.ItemSelected.emit(message)
             self.__show_message(message)
             self.LogEventEmitted.emit(message)
-            self.__clear_results()
+            self.clear_results()
             self._update_button_states()
 
     def evt_show_context_menu(self, pos):

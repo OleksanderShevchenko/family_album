@@ -4,10 +4,14 @@ import shutil
 import sys
 from typing import Optional
 
-from PyQt6 import QtWidgets, uic, QtGui
+import cv2
+from PyQt6 import QtWidgets, uic, QtGui, QtCore
 from PyQt6.QtCore import pyqtSignal, QStringListModel, Qt, QItemSelectionModel
 from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import QVBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu, QListView
+from PyQt6.QtWidgets import (
+    QVBoxLayout, QHBoxLayout, QDialog, QMessageBox, QLabel, QMainWindow, QMenu,
+    QListView, QPushButton
+)
 
 from family_album.gui.widgets.py_ui.duplication_checker_ui import Ui_Form
 from src.family_album.utility_functions.image_utils import is_image_file
@@ -16,6 +20,105 @@ from src.family_album_lib.duplication_memento import (
     DuplicationSaveManager,
     DuplicationCheckStatus
 )
+
+
+class VideoPlayerWidget(QtWidgets.QWidget):
+    """
+    Robust OpenCV-based video preview widget. Decodes frames directly via OpenCV,
+    bypassing Windows Direct3D11 / WMF codec hardware acceleration errors.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(2)
+
+        self.display_label = QLabel(self)
+        self.display_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.display_label.setMinimumSize(200, 150)
+        self.display_label.setMaximumSize(512, 380)
+        self.display_label.setText("<>")
+        self._layout.addWidget(self.display_label)
+
+        # Control buttons bar
+        self.control_layout = QHBoxLayout()
+        self.btn_play = QPushButton("Play", self)
+        self.btn_pause = QPushButton("Pause", self)
+        self.btn_stop = QPushButton("Stop", self)
+
+        self.btn_play.clicked.connect(self.play)
+        self.btn_pause.clicked.connect(self.pause)
+        self.btn_stop.clicked.connect(self.stop)
+
+        self.control_layout.addWidget(self.btn_play)
+        self.control_layout.addWidget(self.btn_pause)
+        self.control_layout.addWidget(self.btn_stop)
+        self._layout.addLayout(self.control_layout)
+
+        self._cap: Optional[cv2.VideoCapture] = None
+        self._timer = QtCore.QTimer(self)
+        self._timer.timeout.connect(self._next_frame)
+        self._is_paused = False
+        self._file_path = ""
+
+    def load_video(self, file_path: str) -> bool:
+        self.stop()
+        self._file_path = file_path
+        self._cap = cv2.VideoCapture(file_path)
+        if not self._cap.isOpened():
+            self.display_label.setText("Error loading video")
+            return False
+
+        fps = self._cap.get(cv2.CAP_PROP_FPS)
+        interval = int(1000 / fps) if fps > 0 else 33
+        self._timer.setInterval(interval)
+        self._is_paused = False
+        self._next_frame()
+        self._timer.start()
+        return True
+
+    def _next_frame(self) -> None:
+        if not self._cap or not self._cap.isOpened() or self._is_paused:
+            return
+
+        ret, frame = self._cap.read()
+        if not ret:
+            # Auto-loop video playback
+            self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret, frame = self._cap.read()
+            if not ret:
+                self.stop()
+                return
+
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_frame.shape
+        bytes_per_line = ch * w
+        q_img = QtGui.QImage(rgb_frame.data, w, h, bytes_per_line, QtGui.QImage.Format.Format_RGB888)
+        pixmap = QtGui.QPixmap.fromImage(q_img)
+
+        mw = self.display_label.maximumWidth()
+        mh = self.display_label.maximumHeight()
+        pixmap = pixmap.scaled(mw, mh, Qt.AspectRatioMode.KeepAspectRatio)
+        self.display_label.setPixmap(pixmap)
+
+    def play(self) -> None:
+        if self._cap and self._cap.isOpened():
+            self._is_paused = False
+            if not self._timer.isActive():
+                self._timer.start()
+
+    def pause(self) -> None:
+        self._is_paused = True
+
+    def stop(self) -> None:
+        self._timer.stop()
+        self._is_paused = False
+        if self._cap:
+            self._cap.release()
+            self._cap = None
+        self.display_label.clear()
+        self.display_label.setText("<>")
 
 
 class DuplicationChecker(QtWidgets.QWidget, Ui_Form):

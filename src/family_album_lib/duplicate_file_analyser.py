@@ -158,6 +158,14 @@ class DuplicateFileAnalyser:
     def duplicate_directories(self) -> Dict[str, Dict]:
         return self.find_duplicate_directories(self.__files_hashes)
 
+    def _should_skip_file(self, file_name: str) -> bool:
+        """Hook method: returns True if file should be skipped during analysis. Default: False."""
+        return False
+
+    def _is_stopped(self) -> bool:
+        """Hook method: returns True if analysis thread should stop early. Default: False."""
+        return False
+
     def start_analysis_thread(self):
         self._find_duplicate_files_multithreaded()
 
@@ -177,7 +185,7 @@ class DuplicateFileAnalyser:
             """
             Local function that calculates file's hash and update the resulting dictionary
             """
-            if not os.path.isfile(file_name):
+            if self._is_stopped() or not os.path.isfile(file_name):
                 return
             filehash = None
             try:
@@ -207,6 +215,8 @@ class DuplicateFileAnalyser:
             else:
                 if filehash:  # if hash not none
                     with lock:  # context manager will release lock automatically even in case of an error
+                        if self._is_stopped():
+                            return
                         # add hash and file name to dictionary
                         if filehash in self.__files_hashes.keys() and file_name not in self.__files_hashes[filehash]:
                             self.__files_hashes[filehash].append(file_name)
@@ -220,16 +230,26 @@ class DuplicateFileAnalyser:
             futures = []
             # iterate through all files and subdirectories
             for dirpath, _, file_names in os.walk(self.directory):
+                if self._is_stopped():
+                    break
                 for filename in file_names:
+                    if self._is_stopped():
+                        break
                     full_file_name = os.path.normpath(os.path.join(dirpath, filename))
-                    futures.append(executor.submit(_get_files_hash, full_file_name))
+                    if not self._should_skip_file(full_file_name):
+                        futures.append(executor.submit(_get_files_hash, full_file_name))
 
             for future in as_completed(futures):
-                future.result()  # wait for all threads to complete
+                if self._is_stopped():
+                    break
+                try:
+                    future.result()  # wait for all threads to complete
+                except Exception as ex:
+                    print(f"Execution error: {ex}")
         return
 
     def _recalculate_and_update_progress(self, total_files: int) -> None:
-        current_progress = int(self.__files_analysed / total_files * 100)
+        current_progress = int(self.__files_analysed / total_files * 100) if total_files > 0 else 0
         if current_progress > self.__progress:
             self.__progress = current_progress
             if isinstance(self._update_progress, Callable):

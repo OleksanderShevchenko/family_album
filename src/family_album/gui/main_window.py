@@ -72,6 +72,10 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self.splitter.setStretchFactor(0, 33)
             self.splitter.setStretchFactor(1, 67)
 
+            # Lock the second tab ("Organize structure") as it is under development and not production ready
+            self.tabWidget.setTabEnabled(1, False)
+            self.tabWidget.setTabToolTip(1, "Organize structure feature is under development (Coming soon)")
+
             # Create vertical splitter separating main content space and log console above status bar
             self.main_vertical_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical, parent=self.centralwidget)
             self.verticalLayout_3.removeWidget(self.splitter)

@@ -1,9 +1,8 @@
-import json
 import os
 import hashlib
 from typing import List, Dict, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Thread, Lock
+from threading import Lock
 
 from src.family_album_lib.directory_analyser import DirectoryAnalyser
 

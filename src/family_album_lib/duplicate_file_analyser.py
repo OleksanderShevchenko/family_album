@@ -184,6 +184,11 @@ class DuplicateFileAnalyser:
 
         if isinstance(self._start_analysis, Callable):
             self._start_analysis("Start analysis.")
+
+        # Emit initial restored progress immediately so GUI progress bar jumps to resumed percentage on start
+        if self._files_analysed > 0 and total_files > 0:
+            self._recalculate_and_update_progress(total_files)
+
         lock = Lock()  # use lock to avoid simultaneous edit dictionary 'file_hashes' from several threads
 
         def _get_files_hash(file_name: str) -> None:
@@ -255,7 +260,7 @@ class DuplicateFileAnalyser:
 
     def _recalculate_and_update_progress(self, total_files: int) -> None:
         current_progress = int(self._files_analysed / total_files * 100) if total_files > 0 else 0
-        if current_progress > self.__progress:
+        if current_progress >= self.__progress:
             self.__progress = current_progress
             if isinstance(self._update_progress, Callable):
                 self._update_progress(self._files_analysed, total_files)

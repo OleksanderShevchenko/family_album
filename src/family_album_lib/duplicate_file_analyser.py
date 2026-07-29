@@ -73,6 +73,89 @@ class DuplicateFileAnalyser():
     def failed_files(self) -> List[str]:
         return self.__failed_files
 
+    @property
+    def duplicate_directories(self) -> Dict[str, Dict]:
+        """
+        Detects exact duplicate directories within analysed files by comparing file content hashes,
+        total file count, and total byte size. File and folder names DO NOT need to match!
+        Returns a dict mapping original_directory -> {"duplicates": list[dup_dirs], "file_count": int, "total_size": int}.
+        """
+        if not self.__files_hashes:
+            return {}
+
+        path_to_hash = {}
+        path_to_size = {}
+
+        for f_hash, paths in self.__files_hashes.items():
+            for p in paths:
+                norm_p = os.path.normpath(p)
+                path_to_hash[norm_p] = f_hash
+                try:
+                    path_to_size[norm_p] = os.path.getsize(norm_p)
+                except Exception:
+                    path_to_size[norm_p] = 0
+
+        all_dirs = set(os.path.dirname(p) for p in path_to_hash.keys())
+        dir_content_map = {}
+
+        for d in all_dirs:
+            file_hashes = []
+            total_size = 0
+            for p, f_hash in path_to_hash.items():
+                if p == d or p.startswith(d + os.sep):
+                    file_hashes.append(f_hash)
+                    total_size += path_to_size[p]
+            if file_hashes:
+                # Signature = (file_count, total_byte_size, sorted_file_hashes_tuple)
+                sig = (len(file_hashes), total_size, tuple(sorted(file_hashes)))
+                dir_content_map[d] = sig
+
+        sig_to_dirs = {}
+        for d, sig in dir_content_map.items():
+            sig_to_dirs.setdefault(sig, []).append(d)
+
+        duplicate_dirs = {}
+        for sig, dir_list in sig_to_dirs.items():
+            if len(dir_list) > 1:
+                # Sort by path length to choose shortest path as original
+                dir_list.sort(key=lambda x: (len(x), x))
+                orig_dir = dir_list[0]
+                dup_dirs = dir_list[1:]
+                file_count = sig[0]
+                total_size = sig[1]
+                duplicate_dirs[orig_dir] = {
+                    "duplicates": dup_dirs,
+                    "file_count": file_count,
+                    "total_size": total_size
+                }
+
+        filtered_duplicate_dirs = {}
+        all_dup_paths = set()
+        for orig, data in duplicate_dirs.items():
+            for dup in data["duplicates"]:
+                all_dup_paths.add(dup)
+
+        for orig, data in duplicate_dirs.items():
+            dups_clean = []
+            for dup in data["duplicates"]:
+                parent_is_dup = False
+                parent = os.path.dirname(dup)
+                while parent and parent != os.path.dirname(parent):
+                    if parent in all_dup_paths and parent != dup:
+                        parent_is_dup = True
+                        break
+                    parent = os.path.dirname(parent)
+                if not parent_is_dup:
+                    dups_clean.append(dup)
+            if dups_clean:
+                filtered_duplicate_dirs[orig] = {
+                    "duplicates": dups_clean,
+                    "file_count": data["file_count"],
+                    "total_size": data["total_size"]
+                }
+
+        return filtered_duplicate_dirs
+
     def start_analysis_thread(self):
         self._find_duplicate_files_multithreaded()
 

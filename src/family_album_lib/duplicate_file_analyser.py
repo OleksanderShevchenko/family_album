@@ -31,7 +31,7 @@ class DuplicateFileAnalyser:
 
         self.__files_hashes: Dict[str, List[str]] = {}
         self.__failed_files: List[str] = []
-        self.__files_analysed: int = 0
+        self._files_analysed: int = 0
         self.__progress: int = 0
         self.__num_of_threads: int = instantly_opened_files
         self._start_analysis: Callable = start_analysis
@@ -47,7 +47,7 @@ class DuplicateFileAnalyser:
         self._directory_analyser.directory = new_directory
         self.__files_hashes = {}
         self.__failed_files = []
-        self.__files_analysed = 0
+        self._files_analysed = 0
         self.__progress = 0
 
     @property
@@ -177,7 +177,7 @@ class DuplicateFileAnalyser:
         # initialize or reset dicts based on hook
         if self._should_reset_hashes():
             self.__files_hashes = {}
-            self.__files_analysed = 0
+            self._files_analysed = 0
         self.__failed_files = []
         self.__progress = 0
         total_files = self._directory_analyser.files_count_in_directory
@@ -202,7 +202,7 @@ class DuplicateFileAnalyser:
                         print(m)
                         with lock:
                             self.__failed_files.append(file_name)  # add failed file to list of failed
-                            self.__files_analysed += 1  # assume file processed - to reach 100% in progress
+                            self._files_analysed += 1  # assume file processed - to reach 100% in progress
                             self._recalculate_and_update_progress(total_files)
                         return
                     file_data = file.read()
@@ -214,7 +214,7 @@ class DuplicateFileAnalyser:
                 print(m)
                 with lock:
                     self.__failed_files.append(file_name)  # add failed file to list of failed
-                    self.__files_analysed += 1  # assume file processed - to reach 100% in progress
+                    self._files_analysed += 1  # assume file processed - to reach 100% in progress
                     self._recalculate_and_update_progress(total_files)
                 return
             else:
@@ -227,7 +227,7 @@ class DuplicateFileAnalyser:
                             self.__files_hashes[filehash].append(file_name)
                         else:
                             self.__files_hashes[filehash] = [file_name]
-                        self.__files_analysed += 1
+                        self._files_analysed += 1
                         self._recalculate_and_update_progress(total_files)
 
         # create thread pool with max threads of self.__num_of_threads which limits
@@ -254,8 +254,8 @@ class DuplicateFileAnalyser:
         return
 
     def _recalculate_and_update_progress(self, total_files: int) -> None:
-        current_progress = int(self.__files_analysed / total_files * 100) if total_files > 0 else 0
+        current_progress = int(self._files_analysed / total_files * 100) if total_files > 0 else 0
         if current_progress > self.__progress:
             self.__progress = current_progress
             if isinstance(self._update_progress, Callable):
-                self._update_progress(self.__files_analysed, total_files)
+                self._update_progress(self._files_analysed, total_files)

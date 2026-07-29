@@ -83,7 +83,7 @@ class ResumableDuplicateAnalyser(DuplicateFileAnalyser):
         self.stop_analysis()
         self.directory = os.path.normpath(memento.directory)
         self._processed_files = {os.path.normpath(k): v for k, v in memento.processed_files.items()}
-        super()._files_analysed = len(self._processed_files)  # restore number of analyzed files
+        self._files_analysed = len(self._processed_files)  # restore number of analyzed files
         # Restore hashes into base class files_hashes
         base_hashes = self.files_hashes
         base_hashes.clear()
@@ -117,7 +117,7 @@ class ResumableDuplicateAnalyser(DuplicateFileAnalyser):
     def _run_resumable_analysis(self) -> None:
         self._status = DuplicationCheckStatus.RUNNING
         # Execute base class multithreaded analysis which uses hooks _should_skip_file & _is_stopped
-        super()._find_duplicate_files_multithreaded()
+        self._find_duplicate_files_multithreaded()
 
         # Build processed_files map from base files_hashes
         for h, paths in self.files_hashes.items():

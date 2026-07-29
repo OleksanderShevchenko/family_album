@@ -8,7 +8,7 @@ from threading import Thread, Lock
 from src.family_album_lib.directory_analyser import DirectoryAnalyser
 
 
-class DuplicateFileAnalyser():
+class DuplicateFileAnalyser:
 
     def __init__(self,
                  directory: str,
@@ -23,7 +23,7 @@ class DuplicateFileAnalyser():
         if instantly_opened_files <= 0:
             raise ValueError(f"Number of instantly opened files shall be positive int higher than zero! " +
                              f"Passed value '{instantly_opened_files}' is inconsistent.")
-        if start_analysis is not None and not isinstance(start_analysis, Callable) :
+        if start_analysis is not None and not isinstance(start_analysis, Callable):
             raise TypeError(f"Argument 'start_analysis' is not callable.")
         if update_analysis is not None and not isinstance(update_analysis, Callable):
             raise TypeError(f"Argument 'update_analysis' is not callable.")
@@ -49,6 +49,7 @@ class DuplicateFileAnalyser():
         self.__files_hashes = {}
         self.__failed_files = []
         self.__files_analysed = 0
+        self.__progress = 0
 
     @property
     def files_count_in_directory(self) -> int:
@@ -73,20 +74,20 @@ class DuplicateFileAnalyser():
     def failed_files(self) -> List[str]:
         return self.__failed_files
 
-    @property
-    def duplicate_directories(self) -> Dict[str, Dict]:
+    @staticmethod
+    def find_duplicate_directories(files_hashes: Dict[str, List[str]]) -> Dict[str, Dict]:
         """
-        Detects exact duplicate directories within analysed files by comparing file content hashes,
+        Detects exact duplicate directories by comparing file content hashes,
         total file count, and total byte size. File and folder names DO NOT need to match!
         Returns a dict mapping original_directory -> {"duplicates": list[dup_dirs], "file_count": int, "total_size": int}.
         """
-        if not self.__files_hashes:
+        if not files_hashes:
             return {}
 
         path_to_hash = {}
         path_to_size = {}
 
-        for f_hash, paths in self.__files_hashes.items():
+        for f_hash, paths in files_hashes.items():
             for p in paths:
                 norm_p = os.path.normpath(p)
                 path_to_hash[norm_p] = f_hash
@@ -121,12 +122,10 @@ class DuplicateFileAnalyser():
                 dir_list.sort(key=lambda x: (len(x), x))
                 orig_dir = dir_list[0]
                 dup_dirs = dir_list[1:]
-                file_count = sig[0]
-                total_size = sig[1]
                 duplicate_dirs[orig_dir] = {
                     "duplicates": dup_dirs,
-                    "file_count": file_count,
-                    "total_size": total_size
+                    "file_count": sig[0],
+                    "total_size": sig[1]
                 }
 
         filtered_duplicate_dirs = {}
@@ -156,16 +155,21 @@ class DuplicateFileAnalyser():
 
         return filtered_duplicate_dirs
 
+    @property
+    def duplicate_directories(self) -> Dict[str, Dict]:
+        return self.find_duplicate_directories(self.__files_hashes)
+
     def start_analysis_thread(self):
         self._find_duplicate_files_multithreaded()
-
 
     def _find_duplicate_files_multithreaded(self) -> None:
         # create empty dicts for hash and for duplicates
         self.__files_hashes = {}
+        self.__failed_files = []
         self.__files_analysed = 0
         self.__progress = 0
         total_files = self._directory_analyser.files_count_in_directory
+
         if isinstance(self._start_analysis, Callable):
             self._start_analysis("Start analysis.")
         lock = Lock()  # use lock to avoid simultaneous edit dictionary 'file_hashes' from several threads

@@ -418,23 +418,68 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
 
     def __populate_files(self):
         original_files = list(self.duplications.keys())
+        total_files = self._duplication_checker.files_count_in_directory if self._duplication_checker else 0
+        analysed_files = len(self._duplication_checker.processed_files) if self._duplication_checker else 0
+        failed_count = len(self._duplication_checker.failed_files) if self._duplication_checker else 0
+        dup_dirs = self._duplication_checker.duplicate_directories if self._duplication_checker else {}
+        duplicated_files_count = sum([len(item) for item in self.duplications.values()])
+        files_with_duplicates_count = len(self.duplications)
+
         if len(original_files) > 0:
             model = QStringListModel(original_files)
             self.lst_original_files.setModel(model)
             self.lst_original_files.selectionModel().currentChanged.connect(self.evt_original_file_selected)
-            if len(self.duplications) > 0:
-                duplicated_files_count = sum([len(item) for item in self.duplications.values()])
-                files_with_duplicates_count = len(self.duplications)
-                message = (f"Totally were found {files_with_duplicates_count} files with duplicates. " +
-                           f"Total number of duplicate files are - {duplicated_files_count}")
-                self.ItemSelected.emit(message)
-                self.__show_message(message)
-                self.LogEventEmitted.emit(message)
+
+            summary_msg = (
+                f"Analysed {analysed_files}/{total_files} files (Ignored: {failed_count}). "
+                f"Found {files_with_duplicates_count} duplicate groups ({duplicated_files_count} files)"
+            )
+            if dup_dirs:
+                summary_msg += f" and {len(dup_dirs)} duplicate folder(s)."
+            else:
+                summary_msg += "."
+
+            self.ItemSelected.emit(summary_msg)
+            self.lblInfo.setText(summary_msg)
         else:
-            message = "No duplication files found"
-            self.__show_message(message)
-            self.LogEventEmitted.emit(message)
+            message = f"No duplicate files found ({analysed_files}/{total_files} files checked, Ignored: {failed_count})."
+            self.lblInfo.setText(message)
+
+        # Log detailed summary report to log console and session log file
+        self._log_detailed_summary(analysed_files, total_files, failed_count, files_with_duplicates_count, duplicated_files_count, dup_dirs)
         self._update_button_states()
+
+    def _log_detailed_summary(self, analysed: int, total: int, failed: int, dup_groups: int, dup_files: int, dup_dirs: dict) -> None:
+        lines = [
+            "==================================================",
+            "📊 DUPLICATE ANALYSIS SUMMARY REPORT",
+            "==================================================",
+            f"📁 Target Location: {self.selected_path}",
+            f"📄 Processed Files: {analysed} / {total} total files",
+            f"⚠️ Ignored/Unreadable Files: {failed}",
+            f"🔍 Duplicate File Groups: {dup_groups} groups ({dup_files} total duplicate files)",
+        ]
+        if dup_dirs:
+            lines.append("--------------------------------------------------")
+            lines.append(f"📁 DUPLICATE DIRECTORIES FOUND ({len(dup_dirs)} folder groups):")
+            for orig, info in dup_dirs.items():
+                f_count = info['file_count']
+                total_bytes = info.get('total_size', 0)
+                if total_bytes >= 1024 * 1024:
+                    size_str = f"{round(total_bytes / (1024 * 1024), 2)} MB"
+                else:
+                    size_str = f"{round(total_bytes / 1024, 2)} KB"
+                for dup in info['duplicates']:
+                    lines.append(
+                        f"   • Duplicate Folder: '{dup}' is an EXACT DUPLICATE of '{orig}' "
+                        f"({f_count} files, total size {size_str})"
+                    )
+        else:
+            lines.append("📁 Duplicate Directories: None detected.")
+
+        lines.append("==================================================")
+        full_report = "\n".join(lines)
+        self.LogEventEmitted.emit(full_report)
 
     @staticmethod
     def __show_message(message: str) -> None:

@@ -129,16 +129,15 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
         self.update()
 
     def evt_update_progress(self, finished: int, total: int) -> None:
-        progress = int(finished / total * 100)
+        progress = int(finished / total * 100) if total > 0 else 0
         current_progress = self.progressBar.value()
         if current_progress < progress <= self.progressBar.maximum():
             self.progressBar.setValue(progress)
             msg = f"Finished {finished} files from {total} total scope of files to analyze"
             self.statusBar().showMessage(msg, self._interval)
-            self.update()
         self._logger.log_debug(f"Update progress: done '{finished}' files of totally '{total}' to be analyzed")
         if finished == total:
-            time.sleep(1)
+            time.sleep(0.1)
             self.evt_finish_analysis("Finish analysis.")
 
     def evt_finish_analysis(self, message: str) -> None:

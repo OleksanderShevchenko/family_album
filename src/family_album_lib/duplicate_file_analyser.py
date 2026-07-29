@@ -166,14 +166,19 @@ class DuplicateFileAnalyser:
         """Hook method: returns True if analysis thread should stop early. Default: False."""
         return False
 
+    def _should_reset_hashes(self) -> bool:
+        """Hook method: returns True if files_hashes should be reset before analysis starts. Default: True."""
+        return True
+
     def start_analysis_thread(self):
         self._find_duplicate_files_multithreaded()
 
     def _find_duplicate_files_multithreaded(self) -> None:
-        # create empty dicts for hash and for duplicates
-        self.__files_hashes = {}
+        # initialize or reset dicts based on hook
+        if self._should_reset_hashes():
+            self.__files_hashes = {}
+            self.__files_analysed = 0
         self.__failed_files = []
-        self.__files_analysed = 0
         self.__progress = 0
         total_files = self._directory_analyser.files_count_in_directory
 

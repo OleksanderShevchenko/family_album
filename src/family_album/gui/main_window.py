@@ -113,10 +113,6 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self.duplication_checker.selected_path = selected_dir
             self.file_organizer.selected_path = selected_dir
             self._logger.log_info(message)
-        elif os.path.isfile(selected_dir):
-            message = f'Selected file {selected_dir}.'
-            self.statusBar().showMessage(message, self._interval)
-            self._logger.log_info(message)
 
     def evt_show_in_statusbar(self, message: str) -> None:
         self.statusBar().showMessage(message, self._interval)

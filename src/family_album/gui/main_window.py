@@ -1,20 +1,17 @@
-__author__ = "Oleksandr Shevchenko"
-__copyright__ = "Oleksandr Shevchenko"
-__contact__ = "oleksander.shevchenko777@gmail.com"
-__version__ = "0.1"
-__license__ = """MIT Licence"""
-
 import os
 import time
 
-from PyQt6 import uic, QtWidgets
+from PyQt6 import uic, QtWidgets, QtCore
+from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import QMainWindow, QVBoxLayout
 
+from src.family_album.gui.dialogs.about_dialog import AboutDialog
 from src.family_album.gui.widgets.directory_view import DirectoryView
 from src.family_album.gui.widgets.duplication_checker import DuplicationChecker
 from src.family_album.gui.widgets.file_organizer import FileOrganizer
+from src.family_album.gui.widgets.log_console import LogConsoleWidget
 from src.family_album.gui.py_ui.main_window import Ui_FamilyAlbumUI
-from src.family_album_lib.create_logger import CustomLogger
+from src.family_album_lib.create_logger import CustomLogger, LogLevel
 
 
 class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
@@ -26,17 +23,37 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
         try:
             self.setupUi(self)
             # self.window = uic.loadUi(os.path.dirname(__file__) + '/py_ui/main_window.ui', self)
+
             self.title = name + ' v.' + version
             self._interval = 10_000  # msec interval for show message in status bar
             self.setWindowTitle(self.title)
+
+            # Create Menu Bar with File and Help menus
+            self.menu_bar = self.menuBar()
+
+            # File Menu
+            self.menu_file = self.menu_bar.addMenu("&File")
+            self.action_exit = QAction("&Exit", self)
+            self.action_exit.setShortcut(QKeySequence("Alt+F4"))
+            self.action_exit.setStatusTip("Exit application")
+            self.action_exit.triggered.connect(self.close)
+            self.menu_file.addAction(self.action_exit)
+
+            # Help Menu
+            self.menu_help = self.menu_bar.addMenu("&Help")
+            self.action_about = QAction("&About...", self)
+            self.action_about.setStatusTip("Show information about Family Album and author")
+            self.action_about.triggered.connect(self.evt_show_about_dialog)
+            self.menu_help.addAction(self.action_about)
+
             self.dir_viewer = DirectoryView(self)
             self.dir_viewer.ItemSelected.connect(self.evt_dir_selected)
             self.duplication_checker = DuplicationChecker(self)
             self.duplication_checker.ItemSelected.connect(self.evt_show_in_statusbar)
             self.file_organizer = FileOrganizer(self)
             self.file_organizer.ItemSelected.connect(self.evt_show_in_statusbar)
+
             layout1 = QVBoxLayout()
-            # insert input widget to this layout
             layout1.addWidget(self.dir_viewer)
             self.directories_space.setLayout(layout1)
 
@@ -50,18 +67,40 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
 
             self.splitter.setStretchFactor(0, 33)
             self.splitter.setStretchFactor(1, 67)
-            # add progress bar in status bar
+
+            # Lock the second tab ("Organize structure") as it is under development and not production ready
+            self.tabWidget.setTabEnabled(1, False)
+            self.tabWidget.setTabToolTip(1, "Organize structure feature is under development (Coming soon)")
+
+            # Create vertical splitter separating main content space and log console above status bar
+            self.main_vertical_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical, parent=self.centralwidget)
+            self.verticalLayout_3.removeWidget(self.splitter)
+            self.main_vertical_splitter.addWidget(self.splitter)
+
+            self.log_console = LogConsoleWidget(parent=self.main_vertical_splitter)
+            self.main_vertical_splitter.addWidget(self.log_console)
+
+            self.verticalLayout_3.addWidget(self.main_vertical_splitter)
+            # Default state: collapsed console (or small initial size)
+            self.main_vertical_splitter.setSizes([800, 0])
+
+            # Add progress bar in status bar
             self.progressBar = QtWidgets.QProgressBar()
             self.statusBar().addPermanentWidget(self.progressBar)
-            # This is simply to show the bar
             self.progressBar.setGeometry(30, 40, 150, 25)
             self.progressBar.setMinimum(0)
             self.progressBar.setMaximum(100)
             self.progressBar.setValue(0)
             self.progressBar.setVisible(False)
             self.progressBar.setTextVisible(False)
+
+            self._logger.log_info(f"Session started. Log file: '{self._logger.log_file_path}'")
         except Exception as err:
             self._logger.log_error(f"Error on main window initialization: {err}")
+
+    def evt_show_about_dialog(self) -> None:
+        dialog = AboutDialog(self)
+        dialog.exec()
 
     def evt_dir_selected(self, selected_dir: str) -> None:
         if os.path.isdir(selected_dir):
@@ -69,47 +108,44 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self.statusBar().showMessage(message, self._interval)
             self.duplication_checker.selected_path = selected_dir
             self.file_organizer.selected_path = selected_dir
-        elif os.path.isfile(selected_dir):
-            message = f'Selected file {selected_dir}.'
-            self.statusBar().showMessage(message, self._interval)
+            self._logger.log_info(message)
 
     def evt_show_in_statusbar(self, message: str) -> None:
         self.statusBar().showMessage(message, self._interval)
+        self._logger.log_info(message)
 
     def evt_start_analysis(self, message: str) -> None:
+        if hasattr(self, 'dir_viewer') and self.dir_viewer:
+            self.dir_viewer.setEnabled(False)
         self.progressBar.setValue(0)
         self.progressBar.setVisible(True)
         self.progressBar.setTextVisible(True)
         self.statusBar().showMessage(message, self._interval)
-        self._logger.log_debug(f"Start analysis '{message}'")
+        self._logger.log_info(f"Start analysis '{message}'")
         self.update()
 
     def evt_update_progress(self, finished: int, total: int) -> None:
-        progress = int(finished / total * 100)
+        progress = int(finished / total * 100) if total > 0 else 0
         current_progress = self.progressBar.value()
         if current_progress < progress <= self.progressBar.maximum():
             self.progressBar.setValue(progress)
-            self.statusBar().showMessage(f"Finished {finished} files from {total} total scope of " +
-                                         f"files to analyze", self._interval)
-            self.update()
+            msg = f"Finished {finished} files from {total} total scope of files to analyze"
+            self.statusBar().showMessage(msg, self._interval)
         self._logger.log_debug(f"Update progress: done '{finished}' files of totally '{total}' to be analyzed")
         if finished == total:
-            time.sleep(1)
+            time.sleep(0.1)
             self.evt_finish_analysis("Finish analysis.")
 
     def evt_finish_analysis(self, message: str) -> None:
+        if hasattr(self, 'dir_viewer') and self.dir_viewer:
+            self.dir_viewer.setEnabled(True)
         self.progressBar.setValue(0)
         self.progressBar.setVisible(False)
         self.progressBar.setTextVisible(False)
         self.statusBar().showMessage(message, self._interval)
-        self._logger.log_debug(f"Finish analysis '{message}'")
+        self._logger.log_info(f"Finish analysis '{message}'")
         self.duplication_checker.populate_duplications()
         self.update()
 
     def log_event(self, message: str) -> None:
-        if 'error' in message.lower():
-            self._logger.log_error(message)
-        elif 'warning' in message.lower():
-            self._logger.log_warning(message)
-        else:
-            self._logger.log_info(message)
+        self._logger.log_event(message)

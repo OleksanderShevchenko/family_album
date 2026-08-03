@@ -1,8 +1,7 @@
 import os
-from abc import ABC
 
 
-class DirectoryAnalyser(ABC):
+class DirectoryAnalyser():
 
     def __init__(self, directory: str) -> None:
         if os.path.isdir(directory):

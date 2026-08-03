@@ -34,11 +34,11 @@ def get_project_metadata():
                 raw_name = poetry_data.get("name", "family-album")
                 name = raw_name.replace("-", " ").title()
                 version = poetry_data.get("version", "0.1.0")
-                authors = poetry_data.get("authors", "Oleksander_Shevchenko <oleksander.shevchenko777@gmail.com>")[0]
+                authors = poetry_data.get("authors", ["Oleksander_Shevchenko <oleksander.shevchenko777@gmail.com>"])[0]
                 author_and_contact = authors.split(" ")
                 assert len(author_and_contact) == 2, "Incorrect format of authors string"
                 author = author_and_contact[0]
-                contact = author_and_contact[1]
+                contact = author_and_contact[1].replace("<", "").replace(">", "")
         except Exception:
             pass
     return name, version, author, contact

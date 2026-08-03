@@ -8,6 +8,29 @@ from src.family_album_lib.directory_analyser import DirectoryAnalyser
 
 
 class DuplicateFileAnalyser:
+    """
+    A core component of the Family Album application responsible for identifying 
+    duplicate files and directories within a specified target directory.
+
+    Purpose and Ideas:
+    ------------------
+    This class orchestrates a high-performance, multithreaded file analysis.
+    It relies on calculating a cryptographic hash (Blake2b) for the entire contents 
+    of each file. Files that yield identical hashes are considered exact duplicates.
+
+    The multithreaded approach, controlled by the `instantly_opened_files` 
+    parameter, ensures that file reading is parallelized, reducing I/O wait times 
+    especially on modern storage drives. To ensure thread safety when recording 
+    file hashes and progress, a threading Lock is employed.
+
+    Additionally, the class is designed to be extensible. It uses hook methods 
+    (`_should_skip_file`, `_is_stopped`, `_should_reset_hashes`) to allow 
+    subclasses (like `ResumableDuplicateAnalyser`) to inject custom pause/resume 
+    and session persistence logic without duplicating the complex multithreading code.
+
+    It also offers directory duplicate detection (`find_duplicate_directories`),
+    identifying folders with identical contents regardless of file or folder name changes.
+    """
 
     def __init__(self,
                  directory: str,
@@ -15,6 +38,25 @@ class DuplicateFileAnalyser:
                  update_analysis: Callable,
                  log_event: Callable,
                  instantly_opened_files: int) -> None:
+        """
+        Initializes the DuplicateFileAnalyser with required configuration and callbacks.
+
+        Args:
+            directory (str): The absolute or relative path to the directory to be analysed.
+                             If the directory is not consistent, NotADirectoryError is raised.
+            start_analysis (Callable): A callback function invoked when the analysis starts. 
+                                       Expected signature: func(message: str).
+            update_analysis (Callable): A callback function invoked to update the GUI progress.
+                                        Expected signature: func(files_analysed: int, total_files: int).
+            log_event (Callable): A callback function invoked to log an error or warning message.
+                                  Expected signature: func(message: str).
+            instantly_opened_files (int): The maximum number of concurrent threads/files 
+                                          opened for reading at the same time. Must be > 0.
+        
+        Raises:
+            ValueError: If `instantly_opened_files` is zero or negative.
+            TypeError: If any of the provided callbacks are not callable.
+        """
         super().__init__()
         # if directory is not consistent it raises NotADirectoryError error
         self._directory_analyser: DirectoryAnalyser = DirectoryAnalyser(directory)
@@ -40,10 +82,17 @@ class DuplicateFileAnalyser:
 
     @property
     def directory(self) -> str:
+        """str: Returns the current target directory being analysed."""
         return self._directory_analyser.directory
 
     @directory.setter
     def directory(self, new_directory: str) -> None:
+        """
+        Sets a new target directory and resets all internal analysis state variables.
+        
+        Args:
+            new_directory (str): The new directory path to assign.
+        """
         self._directory_analyser.directory = new_directory
         self.__files_hashes = {}
         self.__failed_files = []
@@ -52,18 +101,29 @@ class DuplicateFileAnalyser:
 
     @property
     def files_count_in_directory(self) -> int:
+        """int: Returns the total number of files discovered in the target directory."""
         return self._directory_analyser.files_count_in_directory
 
     @property
     def subdirectories_count_in_directory(self) -> int:
+        """int: Returns the total number of subdirectories discovered in the target directory."""
         return self._directory_analyser.subdirectories_count_in_directory
 
     @property
     def files_hashes(self) -> Dict[str, List[str]]:
+        """
+        Dict[str, List[str]]: Returns a dictionary mapping computed file hashes to a list 
+                              of file paths that possess that hash.
+        """
         return self.__files_hashes
 
     @property
     def duplicate_files(self) -> Dict[str, List[str]]:
+        """
+        Dict[str, List[str]]: Returns a filtered dictionary containing only the files 
+                              that have exact duplicates (i.e., hashes mapped to > 1 file path).
+                              The key is the original file path, and the value is a list of duplicate paths.
+        """
         if len(self.__files_hashes) > 0:
             return {file[0]: file[1:] for _, file in self.__files_hashes.items() if len(file) > 1}
         else:
@@ -71,14 +131,28 @@ class DuplicateFileAnalyser:
 
     @property
     def failed_files(self) -> List[str]:
+        """List[str]: Returns a list of file paths that failed to be read or processed."""
         return self.__failed_files
 
     @staticmethod
     def find_duplicate_directories(files_hashes: Dict[str, List[str]]) -> Dict[str, Dict]:
         """
-        Detects exact duplicate directories by comparing file content hashes,
-        total file count, and total byte size. File and folder names DO NOT need to match!
-        Returns a dict mapping original_directory -> {"duplicates": list[dup_dirs], "file_count": int, "total_size": int}.
+        Static utility method that detects exact duplicate directories based purely on their contents.
+        
+        It constructs a "signature" for each directory by aggregating the hashes of all files 
+        within it, the total file count, and the total byte size. If two directories share 
+        the exact same signature, they are marked as duplicates. 
+
+        File and folder names DO NOT need to match for directories to be considered duplicates, 
+        ensuring robustness against file renaming.
+
+        Args:
+            files_hashes (Dict[str, List[str]]): The mapping of file hashes to lists of file paths.
+
+        Returns:
+            Dict[str, Dict]: A dictionary mapping the original directory path to a dictionary 
+                             containing its duplicates, total file count, and total byte size.
+                             Format: { original_dir: {"duplicates": [dup_dir1, dup_dir2], "file_count": int, "total_size": int} }
         """
         if not files_hashes:
             return {}
@@ -156,24 +230,64 @@ class DuplicateFileAnalyser:
 
     @property
     def duplicate_directories(self) -> Dict[str, Dict]:
+        """
+        Dict[str, Dict]: Automatically calculates and returns the duplicate directories 
+                         based on the current `files_hashes` state.
+        """
         return self.find_duplicate_directories(self.__files_hashes)
 
     def _should_skip_file(self, file_name: str) -> bool:
-        """Hook method: returns True if file should be skipped during analysis. Default: False."""
+        """
+        Hook method designed for subclass overrides (e.g., Memento session resumption).
+        
+        Args:
+            file_name (str): The full path of the file to check.
+
+        Returns:
+            bool: True if the file should be skipped during analysis. Default is False.
+        """
         return False
 
     def _is_stopped(self) -> bool:
-        """Hook method: returns True if analysis thread should stop early. Default: False."""
+        """
+        Hook method designed for subclass overrides (e.g., checking if the user paused the scan).
+
+        Returns:
+            bool: True if the analysis threads should stop processing early. Default is False.
+        """
         return False
 
     def _should_reset_hashes(self) -> bool:
-        """Hook method: returns True if files_hashes should be reset before analysis starts. Default: True."""
+        """
+        Hook method designed for subclass overrides (e.g., preventing reset when resuming a session).
+
+        Returns:
+            bool: True if `files_hashes` and progress state should be cleared before 
+                  the analysis starts. Default is True.
+        """
         return True
 
     def start_analysis_thread(self):
+        """
+        Public entry point to begin the multithreaded file analysis process.
+        This method will block the calling thread until all executor threads complete.
+        """
         self._find_duplicate_files_multithreaded()
 
     def _find_duplicate_files_multithreaded(self) -> None:
+        """
+        The core engine of the analyser. It performs a recursive multithreaded traversal 
+        of the target directory, computing Blake2b hashes for each file to identify duplicates.
+
+        Process Flow:
+        -------------
+        1. Evaluates hooks (`_should_reset_hashes`) to initialize or retain state.
+        2. Iterates over all files via `os.walk`, checking the `_should_skip_file` hook.
+        3. Submits file hashing tasks to a `ThreadPoolExecutor`.
+        4. In the worker threads (`_get_files_hash`), the file is fully read and hashed.
+        5. Thread-safe updates (using a Lock) are applied to `self.__files_hashes` and progress.
+        6. Awaits the completion of all futures.
+        """
         # initialize or reset dicts based on hook
         if self._should_reset_hashes():
             self.__files_hashes = {}
@@ -193,7 +307,11 @@ class DuplicateFileAnalyser:
 
         def _get_files_hash(file_name: str) -> None:
             """
-            Local function that calculates file's hash and update the resulting dictionary
+            Local function executed within worker threads. Calculates the file's hash 
+            by reading its full content and safely updates the resulting dictionary.
+
+            Args:
+                file_name (str): The full path of the file to hash.
             """
             if self._is_stopped() or not os.path.isfile(file_name):
                 return
@@ -259,6 +377,12 @@ class DuplicateFileAnalyser:
         return
 
     def _recalculate_and_update_progress(self, total_files: int) -> None:
+        """
+        Calculates the current progress percentage and triggers the GUI update callback.
+        
+        Args:
+            total_files (int): The total number of files designated for analysis.
+        """
         current_progress = int(self._files_analysed / total_files * 100) if total_files > 0 else 0
         if current_progress >= self.__progress:
             self.__progress = current_progress

@@ -1,6 +1,7 @@
 __author__ = "Oleksander Shevchenko"
-__contact__ = "alexcad777@meta.ua"
+__contact__ = "oleksander.shevchenko777@gmail.com"
 __license__ = """Mit license"""
+__tool_name__ = "Family Album"
 
 import sys
 import os
@@ -33,14 +34,21 @@ def get_project_metadata():
                 raw_name = poetry_data.get("name", "family-album")
                 name = raw_name.replace("-", " ").title()
                 version = poetry_data.get("version", "0.1.0")
+                authors = poetry_data.get("authors", "Oleksander_Shevchenko <oleksander.shevchenko777@gmail.com>")[0]
+                author_and_contact = authors.split(" ")
+                assert len(author_and_contact) == 2, "Incorrect format of authors string"
+                author = author_and_contact[0]
+                contact = author_and_contact[1]
         except Exception:
             pass
-    return name, version
+    return name, version, author, contact
 
 
-tool_name, tool_version = get_project_metadata()
+tool_name, tool_version, author, contact = get_project_metadata()
 __version__ = tool_version
-
+__author__ = author
+__contact__ = contact
+__tool_name__ = tool_name
 
 def trap_exc_during_debug(*args):
     # when app raises uncaught exception, print info
@@ -49,9 +57,9 @@ def trap_exc_during_debug(*args):
 
 def run_main(arguments):
     create_app()
-    show_splash(tool_name, tool_version)
+    show_splash(__tool_name__, __version__)
     time.sleep(1)
-    run(tool_name, tool_version)
+    run(__tool_name__, __version__)
 
 
 if __name__ == '__main__':

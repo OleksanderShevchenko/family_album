@@ -35,7 +35,7 @@
    ```
 3. Run the application:
    ```bash
-   poetry run python main.py
+   poetry run python src/family_album/main.py
    ```
 
 ---

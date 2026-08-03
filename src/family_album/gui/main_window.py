@@ -99,7 +99,7 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self._logger.log_error(f"Error on main window initialization: {err}")
 
     def evt_show_about_dialog(self) -> None:
-        dialog = AboutDialog(self, app_name="Family Album", version=__version__)
+        dialog = AboutDialog(self)
         dialog.exec()
 
     def evt_dir_selected(self, selected_dir: str) -> None:

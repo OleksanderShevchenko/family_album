@@ -1,9 +1,3 @@
-__author__ = "Oleksandr Shevchenko"
-__copyright__ = "Oleksandr Shevchenko"
-__contact__ = "oleksander.shevchenko777@gmail.com"
-__version__ = "0.1"
-__license__ = """MIT Licence"""
-
 import os
 import time
 

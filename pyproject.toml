@@ -2,7 +2,7 @@
 name = "family-album"
 version = "0.1.1"
 description = ""
-authors = ["Олександр Шевченко <oleksander.shevchenko777@gmail.com>"]
+authors = ["Oleksander_Shevchenko <oleksander.shevchenko777@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]

@@ -8,7 +8,7 @@ _app = QApplication.instance() or QApplication([])
 class TestAboutDialog(unittest.TestCase):
 
     def test_about_dialog_creation(self):
-        dialog = AboutDialog(app_name="Family Album", version="0.1")
+        dialog = AboutDialog()
         self.assertEqual(dialog.windowTitle(), "About Family Album")
         self.assertTrue(dialog.isModal())
 

@@ -133,6 +133,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
         super().__init__(parent)
         self._parent: QMainWindow = parent
         self.setupUi(self)
+        # uic.loadUi(path.dirname(__file__) + '/py_ui/duplication_checker_ui.ui', self)
 
         self._save_manager: DuplicationSaveManager = DuplicationSaveManager("saves")
 

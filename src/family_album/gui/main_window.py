@@ -28,6 +28,8 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
         self._logger.log_debug("\n***** Start new session *****\n")
         try:
             self.setupUi(self)
+            # self.window = uic.loadUi(os.path.dirname(__file__) + '/py_ui/main_window.ui', self)
+
             self.title = name + ' v.' + version
             self._interval = 10_000  # msec interval for show message in status bar
             self.setWindowTitle(self.title)

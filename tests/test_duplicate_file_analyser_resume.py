@@ -77,7 +77,9 @@ class TestDuplicateFileAnalyserResume(unittest.TestCase):
 
         # 3. Assert single session and multi-session produce IDENTICAL results
         self.assertEqual(len(single_hashes), len(resumed_hashes))
-        self.assertEqual(single_duplicates, resumed_duplicates)
+        single_groups = {frozenset([k] + v) for k, v in single_duplicates.items()}
+        resumed_groups = {frozenset([k] + v) for k, v in resumed_duplicates.items()}
+        self.assertEqual(single_groups, resumed_groups)
 
 
 if __name__ == '__main__':

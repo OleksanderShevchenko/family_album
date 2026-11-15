@@ -1,16 +1,30 @@
+"""
+About Dialog for the Family Album application.
+
+Displays application metadata, version information, feature capabilities,
+license details, and author contacts with dark/light theme adaptive styling.
+"""
+
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
 
-from family_album.main import get_project_metadata
+from src.family_album.main import get_project_metadata
 
 
 class AboutDialog(QDialog):
     """
     Formatted modal dialog displaying application details, features, and author contacts.
+
     Supports both Light and Dark OS desktop themes using adaptive semi-transparent styles.
     """
 
     def __init__(self, parent=None):
+        """
+        Initialize the AboutDialog window.
+
+        Args:
+            parent (Optional[QtWidgets.QWidget]): Parent widget or window.
+        """
         super().__init__(parent)
 
         tool_name, tool_version, author, contact = get_project_metadata()
@@ -39,7 +53,7 @@ class AboutDialog(QDialog):
             <ul style='margin-top: 4px; margin-bottom: 8px; padding-left: 20px;'>
                 <li><b>💾 Duplicate Search for Any Files</b> — with state pause, save, and resume functionality at any time.</li>
                 <li><b>🖼️ 🎥 Visual Comparison Control</b> — convenient preview for photos & videos <i>(target types, but not limited to them)</i>.</li>
-                <li><b>📁 Catalog Organization</b> — organizing photos & videos into structured folders by date <i>(coming soon 🚀)</i>.</li>
+                <li><b>📁 Catalog Organization</b> — organizing photos & videos into structured folders by date with SQLite catalog and collision safety.</li>
             </ul>
             <hr style='border: none; border-top: 1px solid rgba(128, 128, 128, 0.25); margin: 10px 0;'>
             <p style='margin: 4px 0;'><b>👨‍💻 Author:</b> {author}</p>

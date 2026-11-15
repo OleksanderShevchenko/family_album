@@ -1,3 +1,10 @@
+"""
+Main window module for the Family Album desktop application.
+
+Coordinates top-level GUI layout, menus, splitters, log console, status bar,
+and tabbed workspaces (Duplication Checker and File Organizer).
+"""
+
 import os
 import time
 
@@ -15,8 +22,26 @@ from src.family_album_lib.create_logger import CustomLogger, LogLevel
 
 
 class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
+    """
+    Primary desktop application window hosting the main workspace.
+
+    Integrates:
+    - Left sidebar: Directory tree browser (`DirectoryView`).
+    - Right work area tabs:
+      - Tab 1: Duplicate file analyzer & previewer (`DuplicationChecker`).
+      - Tab 2: Media structure organizer by date (`FileOrganizer`).
+    - Bottom collapsable logging console (`LogConsoleWidget`).
+    - Status bar with animated progress tracking and notifications.
+    """
 
     def __init__(self, name: str, version: str):
+        """
+        Initialize the main application window, menus, sub-widgets, and splitters.
+
+        Args:
+            name (str): Application display name.
+            version (str): Application semantic version.
+        """
         super().__init__()
         self._logger = CustomLogger(name, version)
         self._logger.log_debug("\n***** Start new session *****\n")
@@ -52,6 +77,7 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self.duplication_checker.ItemSelected.connect(self.evt_show_in_statusbar)
             self.file_organizer = FileOrganizer(self)
             self.file_organizer.ItemSelected.connect(self.evt_show_in_statusbar)
+            self.file_organizer.LogEventEmitted.connect(self.log_event)
 
             layout1 = QVBoxLayout()
             layout1.addWidget(self.dir_viewer)
@@ -68,9 +94,9 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self.splitter.setStretchFactor(0, 33)
             self.splitter.setStretchFactor(1, 67)
 
-            # Lock the second tab ("Organize structure") as it is under development and not production ready
-            self.tabWidget.setTabEnabled(1, False)
-            self.tabWidget.setTabToolTip(1, "Organize structure feature is under development (Coming soon)")
+            # Enable the second tab ("Organize structure")
+            self.tabWidget.setTabEnabled(1, True)
+            self.tabWidget.setTabToolTip(1, "Organize media files into Year/Month structure")
 
             # Create vertical splitter separating main content space and log console above status bar
             self.main_vertical_splitter = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical, parent=self.centralwidget)
@@ -99,10 +125,19 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self._logger.log_error(f"Error on main window initialization: {err}")
 
     def evt_show_about_dialog(self) -> None:
+        """Display the modal application About dialog."""
         dialog = AboutDialog(self)
         dialog.exec()
 
     def evt_dir_selected(self, selected_dir: str) -> None:
+        """
+        Handle selection of a directory from the DirectoryView tree.
+
+        Propagates selected path to both DuplicationChecker and FileOrganizer widgets.
+
+        Args:
+            selected_dir (str): Filesystem path to selected directory.
+        """
         if os.path.isdir(selected_dir):
             message = f'Selected directory {selected_dir}.'
             self.statusBar().showMessage(message, self._interval)
@@ -111,10 +146,22 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self._logger.log_info(message)
 
     def evt_show_in_statusbar(self, message: str) -> None:
+        """
+        Display a temporary message in the status bar and record it to the logger.
+
+        Args:
+            message (str): Text message to display.
+        """
         self.statusBar().showMessage(message, self._interval)
         self._logger.log_info(message)
 
     def evt_start_analysis(self, message: str) -> None:
+        """
+        Prepare GUI for duplicate analysis: lock directory tree and show progress bar.
+
+        Args:
+            message (str): Status notification text.
+        """
         if hasattr(self, 'dir_viewer') and self.dir_viewer:
             self.dir_viewer.setEnabled(False)
         self.progressBar.setValue(0)
@@ -125,6 +172,13 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
         self.update()
 
     def evt_update_progress(self, finished: int, total: int) -> None:
+        """
+        Update the status bar progress bar based on completed file counts.
+
+        Args:
+            finished (int): Count of files completed.
+            total (int): Total file count.
+        """
         progress = int(finished / total * 100) if total > 0 else 0
         current_progress = self.progressBar.value()
         if current_progress < progress <= self.progressBar.maximum():
@@ -137,6 +191,12 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self.evt_finish_analysis("Finish analysis.")
 
     def evt_finish_analysis(self, message: str) -> None:
+        """
+        Finalize analysis UI: re-enable directory tree, hide progress bar, and display results.
+
+        Args:
+            message (str): Completion message.
+        """
         if hasattr(self, 'dir_viewer') and self.dir_viewer:
             self.dir_viewer.setEnabled(True)
         self.progressBar.setValue(0)
@@ -148,4 +208,10 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
         self.update()
 
     def log_event(self, message: str) -> None:
+        """
+        Log an informational event message through the application custom logger.
+
+        Args:
+            message (str): Message to log.
+        """
         self._logger.log_event(message)

@@ -13,11 +13,13 @@ from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import QMainWindow, QVBoxLayout
 
 from src.family_album.gui.dialogs.about_dialog import AboutDialog
+from src.family_album.gui.dialogs.settings_dialog import SettingsDialog
 from src.family_album.gui.widgets.directory_view import DirectoryView
 from src.family_album.gui.widgets.duplication_checker import DuplicationChecker
 from src.family_album.gui.widgets.file_organizer import FileOrganizer
 from src.family_album.gui.widgets.log_console import LogConsoleWidget
 from src.family_album.gui.py_ui.main_window import Ui_FamilyAlbumUI
+from src.family_album_lib.app_settings import AppSettings
 from src.family_album_lib.create_logger import CustomLogger, LogLevel
 
 
@@ -45,6 +47,7 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
         super().__init__()
         self._logger = CustomLogger(name, version)
         self._logger.log_debug("\n***** Start new session *****\n")
+        self._settings = AppSettings.instance()
         try:
             self.setupUi(self)
             # self.window = uic.loadUi(os.path.dirname(__file__) + '/py_ui/main_window.ui', self)
@@ -53,7 +56,7 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self._interval = 10_000  # msec interval for show message in status bar
             self.setWindowTitle(self.title)
 
-            # Create Menu Bar with File and Help menus
+            # Create Menu Bar with File, Tools, and Help menus
             self.menu_bar = self.menuBar()
 
             # File Menu
@@ -63,6 +66,14 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self.action_exit.setStatusTip("Exit application")
             self.action_exit.triggered.connect(self.close)
             self.menu_file.addAction(self.action_exit)
+
+            # Tools Menu
+            self.menu_tools = self.menu_bar.addMenu("&Tools")
+            self.action_settings = QAction("&Settings...", self)
+            self.action_settings.setShortcut(QKeySequence("Ctrl+,"))
+            self.action_settings.setStatusTip("Configure application settings and parallel worker threads")
+            self.action_settings.triggered.connect(self.evt_show_settings_dialog)
+            self.menu_tools.addAction(self.action_settings)
 
             # Help Menu
             self.menu_help = self.menu_bar.addMenu("&Help")
@@ -120,9 +131,39 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
             self.progressBar.setVisible(False)
             self.progressBar.setTextVisible(False)
 
-            self._logger.log_info(f"Session started. Log file: '{self._logger.log_file_path}'")
+            self._logger.log_info(
+                f"Session started. Worker threads: {self._settings.worker_threads}. "
+                f"Log file: '{self._logger.log_file_path}'"
+            )
+
+            # Restore last selected directory if valid on disk
+            last_dir = self._settings.last_selected_directory
+            if last_dir and os.path.isdir(last_dir):
+                self.dir_viewer.select_directory(last_dir)
+                self.evt_dir_selected(last_dir)
         except Exception as err:
             self._logger.log_error(f"Error on main window initialization: {err}")
+
+    def evt_show_settings_dialog(self) -> None:
+        """
+        Display the modal application Settings dialog (`Tools -> Settings...`).
+
+        Propagates updated worker thread count and startup directory to active tools.
+        """
+        dialog = SettingsDialog(self._settings, self)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            threads = self._settings.worker_threads
+            self.duplication_checker.max_workers = threads
+            self.file_organizer.max_workers = threads
+
+            new_dir = self._settings.last_selected_directory
+            if new_dir and os.path.isdir(new_dir) and new_dir != self.duplication_checker.selected_path:
+                self.dir_viewer.select_directory(new_dir)
+                self.evt_dir_selected(new_dir)
+
+            msg = f"Settings updated: worker threads = {threads}."
+            self.statusBar().showMessage(msg, self._interval)
+            self._logger.log_info(msg)
 
     def evt_show_about_dialog(self) -> None:
         """Display the modal application About dialog."""
@@ -133,16 +174,21 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
         """
         Handle selection of a directory from the DirectoryView tree.
 
-        Propagates selected path to both DuplicationChecker and FileOrganizer widgets.
+        Propagates selected path to both DuplicationChecker and FileOrganizer widgets
+        and persists it in AppSettings (`last_selected_directory`).
 
         Args:
             selected_dir (str): Filesystem path to selected directory.
         """
         if os.path.isdir(selected_dir):
-            message = f'Selected directory {selected_dir}.'
+            norm_dir = os.path.normpath(selected_dir)
+            message = f'Selected directory {norm_dir}.'
             self.statusBar().showMessage(message, self._interval)
-            self.duplication_checker.selected_path = selected_dir
-            self.file_organizer.selected_path = selected_dir
+            self.duplication_checker.selected_path = norm_dir
+            self.file_organizer.selected_path = norm_dir
+            if self._settings.last_selected_directory != norm_dir:
+                self._settings.last_selected_directory = norm_dir
+                self._settings.save()
             self._logger.log_info(message)
 
     def evt_show_in_statusbar(self, message: str) -> None:

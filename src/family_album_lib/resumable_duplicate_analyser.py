@@ -2,6 +2,7 @@ import os
 from threading import Thread, Event
 from typing import Dict, List, Callable, Optional
 
+from src.family_album_lib.app_settings import AppSettings
 from src.family_album_lib.duplicate_file_analyser import DuplicateFileAnalyser
 from src.family_album_lib.duplication_memento import (
     DuplicationCheckStatus,
@@ -16,8 +17,6 @@ class ResumableDuplicateAnalyser(DuplicateFileAnalyser):
     Does NOT duplicate thread execution logic or property proxying.
     """
 
-    _NUM_OPEN_FILES = 200
-
     def __init__(self,
                  directory: str,
                  start_analysis: Optional[Callable] = None,
@@ -27,7 +26,7 @@ class ResumableDuplicateAnalyser(DuplicateFileAnalyser):
                  instantly_opened_files: int = 0) -> None:
         norm_dir = os.path.normpath(directory)
         if instantly_opened_files <= 0:
-            instantly_opened_files = self._NUM_OPEN_FILES
+            instantly_opened_files = AppSettings.instance().worker_threads
 
         super().__init__(
             directory=directory,

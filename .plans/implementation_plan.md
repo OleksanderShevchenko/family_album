@@ -22,20 +22,20 @@ We have introduced a feature to organize family photos and videos into a structu
 
 ## 2. Step-by-Step Implementation Roadmap (Incremental Commits)
 
-### Step 1: Application Settings (`.settings/settings.json`) & `Tools -> Settings...` Dialog — `[NEXT]`
-- [ ] Create `src/family_album_lib/app_settings.py` (`AppSettings`):
+### Step 1: Application Settings (`.settings/settings.json`) & `Tools -> Settings...` Dialog — `[COMPLETED]`
+- [x] Create `src/family_album_lib/app_settings.py` (`AppSettings`):
   - Store settings in `<app_dir>/.settings/settings.json` (next to executable or project root).
   - On first launch, detect logical CPU cores (`os.cpu_count()`) and set default `worker_threads = cpu_cores * 2`, immediately creating `.settings/settings.json`.
   - Persist `worker_threads` and `last_selected_directory`.
-- [ ] Create `src/family_album/gui/dialogs/settings_dialog.py` (`SettingsDialog`):
+- [x] Create `src/family_album/gui/dialogs/settings_dialog.py` (`SettingsDialog`):
   - Display detected CPU cores and recommended thread count (`cores × 2`).
   - Provide SpinBox + Slider for `worker_threads` (`1..256`) and reset button.
   - Display/edit `last_selected_directory`.
-- [ ] Integrate into `MainWindow`, `DirectoryView`, `DuplicationChecker`, and `FileOrganizer`:
+- [x] Integrate into `MainWindow`, `DirectoryView`, `DuplicationChecker`, and `FileOrganizer`:
   - Add `Tools -> Settings...` menu item (`Ctrl+,`).
   - Restore `last_selected_directory` in `DirectoryView` on startup and update on directory selection.
-  - Pass `AppSettings.worker_threads` to `ResumableDuplicateAnalyser`.
-- [ ] Add unit tests in `tests/test_app_settings.py`.
+  - Pass `AppSettings.worker_threads` to both `ResumableDuplicateAnalyser` and `FileOrganizer` / `OrganizerWorker`.
+- [x] Add unit tests in `tests/test_app_settings.py` (5 passed).
 
 ### Step 2: Metadata Extraction Performance Optimization — `[PENDING]`
 - [ ] Optimize `video_utils.py` (`has_video_extension`, `is_file_a_video`, `get_video_resolution_fast`, proper resource cleanup).

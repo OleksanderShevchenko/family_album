@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 from src.family_album.gui.widgets.py_ui.duplication_checker_ui import Ui_Form
 from src.family_album.utility_functions.image_utils import is_image_file
 from src.family_album.utility_functions.video_utils import is_file_a_video
+from src.family_album_lib.app_settings import AppSettings
 from src.family_album_lib.resumable_duplicate_analyser import ResumableDuplicateAnalyser
 from src.family_album_lib.duplication_memento import (
     DuplicationSaveManager,
@@ -129,7 +130,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
     AnalysisFinished = pyqtSignal(str)
     LogEventEmitted = pyqtSignal(str)
 
-    def __init__(self, parent):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self._parent: QMainWindow = parent
         self.setupUi(self)
@@ -171,6 +172,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
         self.LogEventEmitted.connect(self._on_log_event)
 
         self._selected_path: str = ""
+        self._max_workers: int = AppSettings.instance().worker_threads
         self.files_hash: dict = {}
         self.duplications: dict = {}
         self.lblFName.setText("<>")
@@ -213,6 +215,18 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self._videoPlayerDuplicated.setVisible(False)
 
     @property
+    def max_workers(self) -> int:
+        """Return configured number of worker threads for duplicate analysis."""
+        return self._max_workers
+
+    @max_workers.setter
+    def max_workers(self, value: int) -> None:
+        """Update worker thread count and propagate to active analyser if present."""
+        self._max_workers = max(1, int(value))
+        if self._duplication_checker is not None:
+            self._duplication_checker.num_of_threads = self._max_workers
+
+    @property
     def selected_path(self) -> str:
         return self._selected_path
 
@@ -223,11 +237,14 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             norm_path = os.path.normpath(new_path)
             self._selected_path = norm_path
             self.lblFName.setText(norm_path)
-            self._duplication_checker = ResumableDuplicateAnalyser(norm_path,
-                                                                   self.AnalysisStarted.emit,
-                                                                   self.ProgressUpdated.emit,
-                                                                   self.LogEventEmitted.emit,
-                                                                   self.AnalysisFinished.emit)
+            self._duplication_checker = ResumableDuplicateAnalyser(
+                norm_path,
+                self.AnalysisStarted.emit,
+                self.ProgressUpdated.emit,
+                self.LogEventEmitted.emit,
+                self.AnalysisFinished.emit,
+                instantly_opened_files=self._max_workers,
+            )
 
             if self._save_manager.has_save(norm_path):
                 memento = self._save_manager.load_memento(norm_path)

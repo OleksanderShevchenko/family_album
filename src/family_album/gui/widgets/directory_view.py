@@ -1,23 +1,39 @@
+"""
+Directory tree browser widget for the Family Album application.
+
+Displays the local filesystem folder hierarchy using QFileSystemModel and QTreeView,
+allowing users to select a directory and programmatically restoring the last selected
+directory on application startup.
+"""
+
+import os
 import sys
-from os import path
-from PyQt6 import QtWidgets, uic, QtCore, QtGui
+from PyQt6 import QtWidgets, QtCore
 from PyQt6.QtCore import QDir, pyqtSignal
 from PyQt6.QtGui import QFileSystemModel
-from PyQt6.QtWidgets import QTreeView, QVBoxLayout, QHBoxLayout, QDialog
-from PyQt6 import QtWidgets, uic, QtCore, QtGui
-from PyQt6.QtCore import QDir, pyqtSignal
-from PyQt6.QtWidgets import QTreeView, QVBoxLayout, QHBoxLayout, QDialog
+from PyQt6.QtWidgets import QVBoxLayout, QDialog
 
 from src.family_album.gui.widgets.py_ui.directory_view import Ui_Form
 
 
 class DirectoryView(QtWidgets.QWidget, Ui_Form):
+    """
+    Left-pane filesystem directory tree browser.
+
+    Signals:
+        ItemSelected (str): Emitted with the selected directory path when a node is clicked.
+    """
     ItemSelected = pyqtSignal(str)
 
-    def __init__(self, parent):
+    def __init__(self, parent=None):
+        """
+        Initialize the DirectoryView widget and configure the QFileSystemModel.
+
+        Args:
+            parent (Optional[QtWidgets.QWidget]): Parent widget or MainWindow.
+        """
         super().__init__(parent)
         self.setupUi(self)
-        # uic.loadUi(path.dirname(__file__) + '/py_ui/directory_view.ui', self)
 
         self.dir_model = QFileSystemModel()
         self.dir_model.setFilter(QDir.Filter.AllDirs | QDir.Filter.NoDotAndDotDot)
@@ -35,10 +51,43 @@ class DirectoryView(QtWidgets.QWidget, Ui_Form):
         self.directory_tree.setColumnWidth(0, 400)
 
     @QtCore.pyqtSlot(QtCore.QModelIndex)
-    def on_treeView_clicked(self, index):
+    def on_treeView_clicked(self, index: QtCore.QModelIndex) -> None:
+        """
+        Handle user clicks on a directory node in the tree view.
+
+        Args:
+            index (QtCore.QModelIndex): Clicked model index.
+        """
         indexItem = self.dir_model.index(index.row(), 0, index.parent())
         filePath = self.dir_model.filePath(indexItem)
         self.ItemSelected.emit(filePath)
+
+    def select_directory(self, directory_path: str) -> bool:
+        """
+        Programmatically expand, scroll to, and select a directory path in the tree view.
+
+        Args:
+            directory_path (str): Filesystem directory path to select.
+
+        Returns:
+            bool: True if the directory exists and was selected, False otherwise.
+        """
+        if not directory_path or not os.path.isdir(directory_path):
+            return False
+        norm_path = os.path.normpath(directory_path)
+        index = self.dir_model.index(norm_path)
+        if not index.isValid():
+            return False
+
+        # Expand all parent nodes up to root
+        parent_idx = index.parent()
+        while parent_idx.isValid():
+            self.directory_tree.expand(parent_idx)
+            parent_idx = parent_idx.parent()
+
+        self.directory_tree.setCurrentIndex(index)
+        self.directory_tree.scrollTo(index, QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
+        return True
 
 
 if __name__ == "__main__":

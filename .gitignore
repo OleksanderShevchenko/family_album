@@ -108,4 +108,5 @@ poetry.lock
 # mypy
 .mypy_cache/
 /settings/settings.toml
+/.settings/
 /tests/test.xlsx

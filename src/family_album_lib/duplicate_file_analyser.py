@@ -81,6 +81,18 @@ class DuplicateFileAnalyser:
         self._log_event: Callable = log_event
 
     @property
+    def num_of_threads(self) -> int:
+        """int: Returns the configured number of concurrent worker threads."""
+        return self.__num_of_threads
+
+    @num_of_threads.setter
+    def num_of_threads(self, value: int) -> None:
+        """Sets the number of concurrent worker threads (must be > 0)."""
+        if value <= 0:
+            raise ValueError(f"Number of threads must be positive, got {value}.")
+        self.__num_of_threads = int(value)
+
+    @property
     def directory(self) -> str:
         """str: Returns the current target directory being analysed."""
         return self._directory_analyser.directory

@@ -20,6 +20,7 @@ from PyQt6.QtGui import QStandardItemModel, QStandardItem
 from PyQt6.QtWidgets import QMessageBox, QFileDialog
 
 from src.family_album.gui.widgets.py_ui.file_organizer_ui import Ui_Form
+from src.family_album_lib.app_settings import AppSettings
 from src.family_album_lib.organizer_db import OrganizerDatabase
 from src.family_album_lib.file_organizer_engine import (
     FileOrganizerEngine,
@@ -65,6 +66,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         self._target_path: str = ""
         self._worker: Optional[OrganizerWorker] = None
         self._current_plan: List[OrganizePlanItem] = []
+        self._max_workers: int = AppSettings.instance().worker_threads
 
         # Connect UI controls
         self.pb_browse_source.clicked.connect(self.evt_browse_source)
@@ -90,6 +92,26 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         self.tbl_file_data.setSortingEnabled(True)
         self.tbl_file_data.horizontalHeader().setSectionsMovable(True)
         self.tbl_file_data.setModel(QStandardItemModel())
+
+    @property
+    def max_workers(self) -> int:
+        """
+        Configured number of parallel worker threads for organizer operations.
+
+        Returns:
+            int: Worker thread count.
+        """
+        return self._max_workers
+
+    @max_workers.setter
+    def max_workers(self, value: int) -> None:
+        """
+        Update the number of parallel worker threads.
+
+        Args:
+            value (int): New thread count (> 0).
+        """
+        self._max_workers = max(1, int(value))
 
     @property
     def selected_path(self) -> str:
@@ -270,6 +292,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             mode=mode,
             action_type=action,
             operation="analyze",
+            max_workers=self._max_workers,
             parent=self
         )
         self._worker.progress_updated.connect(self._on_progress_updated)
@@ -413,6 +436,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             mode=mode,
             action_type=action,
             operation="organize",
+            max_workers=self._max_workers,
             parent=self
         )
         self._worker.progress_updated.connect(self._on_progress_updated)

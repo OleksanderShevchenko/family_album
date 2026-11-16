@@ -35,6 +35,7 @@ from src.family_album.utility_functions.video_utils import (
     is_file_a_video,
     get_video_metadata,
 )
+from src.family_album_lib.app_settings import AppSettings
 from src.family_album_lib.organizer_db import OrganizerDatabase
 
 
@@ -312,7 +313,8 @@ class FileOrganizerEngine:
         action_type: str = "copy",
         prefer_filename: bool = True,
         cancel_event: Optional[threading.Event] = None,
-        progress_cb: Optional[Callable[[int, int], None]] = None
+        progress_cb: Optional[Callable[[int, int], None]] = None,
+        max_workers: int = 0
     ) -> List[OrganizePlanItem]:
         """
         Scan source directory and construct an actionable organization plan.
@@ -432,7 +434,8 @@ class FileOrganizerEngine:
         cancel_event: Optional[threading.Event] = None,
         progress_cb: Optional[Callable[[int, int], None]] = None,
         status_cb: Optional[Callable[[str], None]] = None,
-        log_cb: Optional[Callable[[str], None]] = None
+        log_cb: Optional[Callable[[str], None]] = None,
+        max_workers: int = 0
     ) -> OrganizeStats:
         """
         Execute the organization plan and record transactions into the database.
@@ -601,6 +604,7 @@ class OrganizerWorker(QThread):
         mode: str = "new_organization",
         action_type: str = "copy",
         operation: str = "organize",  # "analyze" or "organize"
+        max_workers: int = 0,
         parent=None
     ):
         """
@@ -612,6 +616,7 @@ class OrganizerWorker(QThread):
             mode (str): Organization mode ('new_organization' or 'self_organization').
             action_type (str): Transfer method ('copy' or 'move').
             operation (str): Operational mode ('analyze' for preview plan, 'organize' for execution).
+            max_workers (int): Number of parallel worker threads (defaults to AppSettings.worker_threads).
             parent (Optional[QObject]): Parent Qt object.
         """
         super().__init__(parent)
@@ -620,6 +625,7 @@ class OrganizerWorker(QThread):
         self.mode = mode
         self.action_type = action_type
         self.operation = operation
+        self.max_workers = max_workers if max_workers > 0 else AppSettings.instance().worker_threads
         self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
@@ -642,7 +648,8 @@ class OrganizerWorker(QThread):
                     mode=self.mode,
                     action_type=self.action_type,
                     cancel_event=self._cancel_event,
-                    progress_cb=self.progress_updated.emit
+                    progress_cb=self.progress_updated.emit,
+                    max_workers=self.max_workers
                 )
                 self.plan_ready.emit(plan)
                 self.status_message.emit(f"Scan complete. Found {len(plan)} files.")
@@ -655,7 +662,8 @@ class OrganizerWorker(QThread):
                     mode=self.mode,
                     action_type=self.action_type,
                     cancel_event=self._cancel_event,
-                    progress_cb=self.progress_updated.emit
+                    progress_cb=self.progress_updated.emit,
+                    max_workers=self.max_workers
                 )
                 if self._cancel_event.is_set():
                     return
@@ -669,7 +677,8 @@ class OrganizerWorker(QThread):
                     cancel_event=self._cancel_event,
                     progress_cb=self.progress_updated.emit,
                     status_cb=self.status_message.emit,
-                    log_cb=self.log_event.emit
+                    log_cb=self.log_event.emit,
+                    max_workers=self.max_workers
                 )
                 self.finished.emit(stats)
 

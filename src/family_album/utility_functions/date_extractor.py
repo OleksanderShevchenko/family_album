@@ -82,6 +82,38 @@ class MediaDateResult:
             return f"{self.date.month:02d}"
         return ""
 
+    def to_dict(self) -> dict:
+        """
+        Serialize MediaDateResult into a JSON-compatible dictionary.
+
+        Returns:
+            dict: Serialized date result dictionary.
+        """
+        return {
+            "date": self.date.strftime("%Y-%m-%d %H:%M:%S") if self.date else None,
+            "source": self.source,
+            "detail": self.detail,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MediaDateResult":
+        """
+        Reconstruct MediaDateResult from a dictionary.
+
+        Args:
+            data (dict): Serialized date result dictionary.
+
+        Returns:
+            MediaDateResult: Deserialized result object.
+        """
+        raw_dt = data.get("date")
+        dt = datetime.strptime(raw_dt, "%Y-%m-%d %H:%M:%S") if raw_dt else None
+        return cls(
+            date=dt,
+            source=data.get("source", "none"),
+            detail=data.get("detail", ""),
+        )
+
 
 # Regex patterns for dates extracted from filename
 _FILENAME_PATTERNS = [

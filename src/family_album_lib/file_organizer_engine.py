@@ -2,38 +2,47 @@
 Domain engine and background worker for organizing media files by date.
 
 This module provides the core business logic for the File Organizer feature:
-- Scanning source folders for candidate photos and videos.
-- Extracting capture dates prioritizing filename patterns over EXIF/video container metadata.
+- Multithreaded per-file scanning via `ThreadPoolExecutor` using `AppSettings.worker_threads`.
+- Fast single-pass Pillow image inspection (size, camera maker, EXIF date in one header open)
+  and OpenCV video resolution lookup (avoiding MoviePy/FFmpeg unless needed for date fallback).
 - Generating a structured execution plan targeting `<target>/YYYY/MM` or `<target>/No_Date`.
 - Performing disk capacity pre-checks before copy operations.
-- Safely copying or moving files with automatic collision disambiguation (`_copyN`).
+- Multithreaded safe copying or moving of files with atomic collision disambiguation (`_copyN`)
+  and Blake2b hashing.
 - Invariant safety: never deletes or overwrites files.
-- Threaded execution via PyQt6 QThread (OrganizerWorker) with real-time UI signals.
-- Transactional recording in SQLite catalog (`.db/album.db`).
+- Reusing pre-analyzed plans when transitioning from preview to organization.
+- Threaded execution via PyQt6 QThread (`OrganizerWorker`) with throttled real-time UI signals.
+- Thread-safe transactional recording in SQLite catalog (`.db/album.db`).
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import os
 import shutil
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, List, Optional, Tuple, Dict, Any
+from typing import Callable, List, Optional, Set, Tuple
 
+from PIL import Image
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from src.family_album.utility_functions.date_extractor import (
-    extract_media_date,
+    extract_date_from_exif,
+    extract_date_from_filename,
+    extract_date_from_pil_exif,
+    extract_date_from_video,
     MediaDateResult,
 )
 from src.family_album.utility_functions.image_utils import (
+    has_image_extension,
     is_image_file,
-    get_image_size,
-    get_image_maker,
 )
 from src.family_album.utility_functions.video_utils import (
+    get_video_resolution_fast,
+    has_video_extension,
     is_file_a_video,
-    get_video_metadata,
 )
 from src.family_album_lib.app_settings import AppSettings
 from src.family_album_lib.organizer_db import OrganizerDatabase
@@ -122,13 +131,13 @@ class OrganizeStats:
     details: List[str] = field(default_factory=list)
 
 
-def calculate_file_hash(file_path: str, chunk_size: int = 65536) -> str:
+def calculate_file_hash(file_path: str, chunk_size: int = 131072) -> str:
     """
     Compute the Blake2b cryptographic hash of a file reading in chunks.
 
     Args:
         file_path (str): Path to file to hash.
-        chunk_size (int): Number of bytes read per chunk (default 64 KB).
+        chunk_size (int): Number of bytes read per chunk (default 128 KB).
 
     Returns:
         str: Hexadecimal digest string representing the file content hash.
@@ -175,104 +184,140 @@ def ensure_directory(path: str) -> None:
         os.makedirs(path, exist_ok=True)
 
 
-def safe_copy_file(src: str, dst_dir: str) -> Tuple[bool, str, str]:
+def _norm_key(path: str) -> str:
+    """Return case-normalized absolute path key for thread-safe path reservation."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _reserve_unique_destination(
+    dst_dir: str,
+    base_name: str,
+    reserved_paths: Optional[Set[str]] = None,
+) -> str:
+    """
+    Find and atomically reserve an unused destination path inside `dst_dir`.
+    Must be invoked while holding `collision_lock` when used across threads.
+
+    Args:
+        dst_dir (str): Destination directory path.
+        base_name (str): Desired filename with extension.
+        reserved_paths (Optional[Set[str]]): Shared set of already reserved normalized paths.
+
+    Returns:
+        str: Guaranteed unique destination file path (suffixed with `_copyN` if needed).
+    """
+    dst = os.path.join(dst_dir, base_name)
+    key = _norm_key(dst)
+    is_taken = os.path.exists(dst) or (reserved_paths is not None and key in reserved_paths)
+
+    if is_taken:
+        name, ext = os.path.splitext(base_name)
+        i = 1
+        while True:
+            candidate = os.path.join(dst_dir, f"{name}_copy{i}{ext}")
+            cand_key = _norm_key(candidate)
+            if not os.path.exists(candidate) and (reserved_paths is None or cand_key not in reserved_paths):
+                dst = candidate
+                key = cand_key
+                break
+            i += 1
+
+    if reserved_paths is not None:
+        reserved_paths.add(key)
+    return dst
+
+
+def safe_copy_file(
+    src: str,
+    dst_dir: str,
+    src_hash: Optional[str] = None,
+    reserved_paths: Optional[Set[str]] = None,
+    collision_lock: Optional[threading.Lock] = None,
+) -> Tuple[bool, str, str]:
     """
     Safely copy a source file to destination directory without overwriting or deleting.
+    Thread-safe when provided with shared `reserved_paths` and `collision_lock`.
 
     Behavior:
     - If source and destination paths are identical, skips operation.
-    - If a file with the target name exists, checks content hash:
+    - If a file with the target name exists on disk, compares content hashes:
       - If identical content, skips copying to prevent duplicates.
-      - If content differs, suffixes name with `_copy1`, `_copy2`, etc.
-    - Preserves file metadata and timestamps using shutil.copy2.
+      - If content differs, reserves a unique `_copy1`, `_copy2`, ... filename.
+    - Preserves file metadata and timestamps using `shutil.copy2` outside the lock.
 
     Args:
         src (str): Absolute path to source file.
         dst_dir (str): Target folder where file will be copied.
+        src_hash (Optional[str]): Pre-computed Blake2b hash of `src` to avoid rehashing.
+        reserved_paths (Optional[Set[str]]): Shared set of reserved target paths across worker threads.
+        collision_lock (Optional[threading.Lock]): Lock protecting atomic filename reservation.
 
     Returns:
         Tuple[bool, str, str]: (success_flag, final_destination_path, status_detail_message).
     """
     ensure_directory(dst_dir)
     base_name = os.path.basename(src)
-    dst = os.path.join(dst_dir, base_name)
+    default_dst = os.path.join(dst_dir, base_name)
 
-    if os.path.abspath(src) == os.path.abspath(dst):
-        return False, dst, "identical_source_and_destination"
+    if _norm_key(src) == _norm_key(default_dst):
+        return False, default_dst, "identical_source_and_destination"
 
-    if os.path.exists(dst):
-        # Compare hashes
+    # Check if an identical file already exists at default_dst on disk
+    if os.path.exists(default_dst):
         try:
-            if calculate_file_hash(src) == calculate_file_hash(dst):
-                return False, dst, "identical_file_already_at_destination"
+            computed_src_hash = src_hash or calculate_file_hash(src)
+            if computed_src_hash == calculate_file_hash(default_dst):
+                return False, default_dst, "identical_file_already_at_destination"
         except Exception:
             pass
 
-        # Disambiguate name with _copyN
-        name, ext = os.path.splitext(base_name)
-        i = 1
-        while True:
-            candidate = os.path.join(dst_dir, f"{name}_copy{i}{ext}")
-            if not os.path.exists(candidate):
-                dst = candidate
-                break
-            i += 1
+    if collision_lock is not None:
+        with collision_lock:
+            dst = _reserve_unique_destination(dst_dir, base_name, reserved_paths)
+    else:
+        dst = _reserve_unique_destination(dst_dir, base_name, reserved_paths)
 
     shutil.copy2(src, dst)
     return True, dst, "copied"
 
 
-def safe_move_file(src: str, dst_dir: str) -> Tuple[bool, str, str]:
+def safe_move_file(
+    src: str,
+    dst_dir: str,
+    reserved_paths: Optional[Set[str]] = None,
+    collision_lock: Optional[threading.Lock] = None,
+) -> Tuple[bool, str, str]:
     """
     Safely move a source file to destination directory without deleting or overwriting.
+    Thread-safe when provided with shared `reserved_paths` and `collision_lock`.
 
     Behavior:
     - If source and destination paths are identical, skips operation.
-    - If destination filename exists:
-      - Checks hash: if identical, disambiguates to preserve copy, ensuring source is never deleted.
-      - If different, appends `_copy1`, `_copy2`, etc. until a free filename is found.
-    - Moves file using shutil.move.
+    - If destination filename already exists on disk or is reserved by another thread,
+      always disambiguates with `_copy1`, `_copy2`, etc. (source is NEVER deleted or overwritten).
+    - Moves file using `shutil.move` outside the lock.
 
     Args:
         src (str): Absolute path to source file.
         dst_dir (str): Target folder where file will be moved.
+        reserved_paths (Optional[Set[str]]): Shared set of reserved target paths across worker threads.
+        collision_lock (Optional[threading.Lock]): Lock protecting atomic filename reservation.
 
     Returns:
         Tuple[bool, str, str]: (success_flag, final_destination_path, status_detail_message).
     """
     ensure_directory(dst_dir)
     base_name = os.path.basename(src)
-    dst = os.path.join(dst_dir, base_name)
+    default_dst = os.path.join(dst_dir, base_name)
 
-    if os.path.abspath(src) == os.path.abspath(dst):
-        return False, dst, "identical_source_and_destination"
+    if _norm_key(src) == _norm_key(default_dst):
+        return False, default_dst, "identical_source_and_destination"
 
-    if os.path.exists(dst):
-        # Compare hashes
-        try:
-            if calculate_file_hash(src) == calculate_file_hash(dst):
-                # An identical file already exists at target!
-                # We NEVER delete src, but we preserve it as a copy or leave it
-                name, ext = os.path.splitext(base_name)
-                i = 1
-                while True:
-                    candidate = os.path.join(dst_dir, f"{name}_copy{i}{ext}")
-                    if not os.path.exists(candidate):
-                        dst = candidate
-                        break
-                    i += 1
-        except Exception:
-            pass
+    if collision_lock is not None:
+        with collision_lock:
+            dst = _reserve_unique_destination(dst_dir, base_name, reserved_paths)
     else:
-        # Check candidate naming
-        name, ext = os.path.splitext(base_name)
-        i = 1
-        while os.path.exists(dst):
-            candidate = os.path.join(dst_dir, f"{name}_copy{i}{ext}")
-            if not os.path.exists(candidate):
-                dst = candidate
-                break
-            i += 1
+        dst = _reserve_unique_destination(dst_dir, base_name, reserved_paths)
 
     shutil.move(src, dst)
     return True, dst, "moved"
@@ -284,9 +329,10 @@ class FileOrganizerEngine:
 
     Encapsulates all logic for:
     - Scanning candidate source directories (with exclusion of `.db` and `.git`).
+    - Parallel single-pass per-file inspection via `ThreadPoolExecutor`.
     - Determining sibling target directories (`<source>_organized`).
     - Building preview plans mapping files to `<target>/YYYY/MM` or `<target>/No_Date`.
-    - Executing plans with copy/move actions and writing audit records to `album.db`.
+    - Executing plans in parallel with atomic collision safety and writing audit records to `album.db`.
     """
 
     @staticmethod
@@ -306,6 +352,151 @@ class FileOrganizerEngine:
         return os.path.join(parent_dir, f"{source_name}_organized")
 
     @staticmethod
+    def _inspect_single_file(
+        full_path: str,
+        target_abs: str,
+        action_type: str,
+        prefer_filename: bool = True,
+    ) -> OrganizePlanItem:
+        """
+        Inspect a single candidate file in one optimized pass (designed to run inside
+        a `ThreadPoolExecutor` worker thread).
+
+        Optimization strategy:
+        - Filename regex parsing runs first in memory (zero disk I/O).
+        - For images: opens Pillow header **once** to obtain `size` (resolution),
+          `Make` (tag 271), and EXIF Sub-IFD capture date (if not already found in filename).
+        - For videos: obtains resolution via fast OpenCV (`get_video_resolution_fast`) and
+          only calls MoviePy (`extract_date_from_video`) if no date was found in the filename.
+        - Non-media files bypass Pillow/OpenCV/MoviePy completely.
+
+        Args:
+            full_path (str): Absolute path to the candidate file.
+            target_abs (str): Absolute destination root directory.
+            action_type (str): Planned transfer method ('copy' or 'move').
+            prefer_filename (bool): Whether filename date parsing takes priority.
+
+        Returns:
+            OrganizePlanItem: Constructed plan item for the file.
+        """
+        fname = os.path.basename(full_path)
+        try:
+            fsize = os.path.getsize(full_path)
+        except OSError:
+            fsize = 0
+
+        date_res: Optional[MediaDateResult] = None
+
+        # 1. Priority 1: Filename date parsing (zero disk I/O)
+        if prefer_filename:
+            fn_date = extract_date_from_filename(fname)
+            if fn_date:
+                date_res = MediaDateResult(
+                    date=fn_date,
+                    source="filename",
+                    detail=f"Extracted from name: {fname}",
+                )
+
+        is_vid = False
+        is_img = False
+        resolution = ""
+        maker = ""
+
+        lower_path = full_path.lower()
+        is_gif = lower_path.endswith(".gif")
+
+        # 2. Fast media type classification & single-pass metadata inspection
+        if has_video_extension(full_path) or is_gif:
+            is_vid = is_file_a_video(full_path)
+            if is_vid:
+                resolution = get_video_resolution_fast(full_path)
+                if date_res is None:
+                    v_date = extract_date_from_video(full_path)
+                    if v_date:
+                        date_res = MediaDateResult(
+                            date=v_date,
+                            source="video_metadata",
+                            detail="Extracted from video metadata",
+                        )
+
+        if not is_vid and (has_image_extension(full_path) or is_gif):
+            # Single Pillow open for is_image + resolution + maker + EXIF date!
+            try:
+                with Image.open(full_path) as img:
+                    is_img = True
+                    w, h = img.size
+                    if w and h:
+                        resolution = f"{w}x{h}"
+                    try:
+                        exif = img.getexif()
+                        if exif:
+                            if 271 in exif:
+                                maker = str(exif[271]).strip()
+                            if date_res is None:
+                                pil_dt = extract_date_from_pil_exif(exif)
+                                if pil_dt:
+                                    date_res = MediaDateResult(
+                                        date=pil_dt,
+                                        source="exif",
+                                        detail="Extracted from EXIF DateTimeOriginal",
+                                    )
+                    except Exception:
+                        pass
+            except Exception:
+                # Fallback verification for unusual image formats (e.g. OpenCV-readable)
+                if is_image_file(full_path):
+                    is_img = True
+
+            # Only invoke lightweight exifread fallback if Pillow did not find an EXIF date
+            if is_img and date_res is None:
+                exif_dt = extract_date_from_exif(full_path)
+                if exif_dt:
+                    date_res = MediaDateResult(
+                        date=exif_dt,
+                        source="exif",
+                        detail="Extracted from EXIF DateTimeOriginal",
+                    )
+
+        # 3. Filename fallback if prefer_filename was False
+        if not prefer_filename and date_res is None:
+            fn_date = extract_date_from_filename(fname)
+            if fn_date:
+                date_res = MediaDateResult(
+                    date=fn_date,
+                    source="filename",
+                    detail=f"Extracted from name: {fname}",
+                )
+
+        # 4. Unresolved date -> No_Date
+        if date_res is None:
+            date_res = MediaDateResult(
+                date=None,
+                source="none",
+                detail="No creation date found in filename or metadata",
+            )
+
+        if date_res.has_date:
+            dest_subdir = os.path.join(target_abs, date_res.year_folder, date_res.month_folder)
+        else:
+            dest_subdir = os.path.join(target_abs, "No_Date")
+
+        target_file_path = os.path.join(dest_subdir, fname)
+
+        return OrganizePlanItem(
+            file_path=full_path,
+            file_name=fname,
+            file_size=fsize,
+            date_result=date_res,
+            destination_dir=dest_subdir,
+            target_path=target_file_path,
+            is_video=is_vid,
+            is_image=is_img,
+            resolution=resolution,
+            maker=maker,
+            action_type=action_type,
+        )
+
+    @staticmethod
     def scan_and_plan(
         source_dir: str,
         target_dir: str,
@@ -317,12 +508,13 @@ class FileOrganizerEngine:
         max_workers: int = 0
     ) -> List[OrganizePlanItem]:
         """
-        Scan source directory and construct an actionable organization plan.
+        Scan source directory in parallel using `ThreadPoolExecutor` and construct
+        an actionable organization plan.
 
-        Inspects each candidate file to extract creation/taken date (prioritizing filename),
-        determines destination subfolder (`YYYY/MM` or `No_Date`), and probes file metadata.
-        In self-organization mode, skips already structured subdirectories matching `YYYY/MM`
-        or `No_Date`.
+        Inspects each candidate file concurrently to extract creation/taken date
+        (prioritizing filename), determines destination subfolder (`YYYY/MM` or `No_Date`),
+        and probes file metadata in a single pass. In self-organization mode, skips
+        already structured subdirectories matching `YYYY/MM` or `No_Date`.
 
         Args:
             source_dir (str): Root folder to scan.
@@ -332,6 +524,7 @@ class FileOrganizerEngine:
             prefer_filename (bool): If True, prioritized date patterns embedded in filename.
             cancel_event (Optional[threading.Event]): Cooperative cancellation event flag.
             progress_cb (Optional[Callable[[int, int], None]]): Callback reporting (current, total).
+            max_workers (int): Number of parallel worker threads (defaults to AppSettings.worker_threads).
 
         Returns:
             List[OrganizePlanItem]: Array of prepared items scheduled for organization.
@@ -344,12 +537,15 @@ class FileOrganizerEngine:
         target_abs = os.path.abspath(target_dir)
 
         # First pass: collect all candidate files
-        all_candidate_files = []
+        all_candidate_files: List[str] = []
         for dirpath, dirnames, filenames in os.walk(source_abs):
+            if cancel_event and cancel_event.is_set():
+                return plan
+
             # Skip .db and .git directories
             dirnames[:] = [d for d in dirnames if d != OrganizerDatabase.DB_FOLDER_NAME and d != ".git"]
 
-            # If self-organizing, skip already organized folders matching YYYY/MM
+            # If self-organizing, skip already organized folders matching YYYY/MM or No_Date
             if mode == "self_organization" and dirpath != source_abs:
                 rel = os.path.relpath(dirpath, source_abs)
                 parts = rel.split(os.sep)
@@ -363,66 +559,55 @@ class FileOrganizerEngine:
                 all_candidate_files.append(full_path)
 
         total_files = len(all_candidate_files)
+        if total_files == 0:
+            return plan
 
-        for idx, full_path in enumerate(all_candidate_files):
+        workers = max_workers if max_workers > 0 else AppSettings.instance().worker_threads
+        workers = max(1, min(workers, total_files))
+
+        completed = 0
+        last_report_time = 0.0
+        results_by_idx: dict[int, OrganizePlanItem] = {}
+
+        def _worker_task(index: int, path: str) -> Tuple[int, Optional[OrganizePlanItem]]:
             if cancel_event and cancel_event.is_set():
-                break
-
-            fname = os.path.basename(full_path)
-            try:
-                fsize = os.path.getsize(full_path)
-            except OSError:
-                fsize = 0
-
-            # Date extraction
-            date_res = extract_media_date(
-                full_path,
+                return index, None
+            item = FileOrganizerEngine._inspect_single_file(
+                full_path=path,
+                target_abs=target_abs,
+                action_type=action_type,
                 prefer_filename=prefer_filename,
-                allow_filesystem_fallback=False
             )
+            return index, item
 
-            # Route to YYYY/MM or No_Date
-            if date_res.has_date:
-                dest_subdir = os.path.join(target_abs, date_res.year_folder, date_res.month_folder)
-            else:
-                dest_subdir = os.path.join(target_abs, "No_Date")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(_worker_task, idx, fpath)
+                for idx, fpath in enumerate(all_candidate_files)
+            ]
 
-            target_file_path = os.path.join(dest_subdir, fname)
+            for future in as_completed(futures):
+                if cancel_event and cancel_event.is_set():
+                    for f in futures:
+                        f.cancel()
+                    break
 
-            # Metadata inspection
-            is_vid = is_file_a_video(full_path)
-            is_img = False if is_vid else is_image_file(full_path)
-            resolution = ""
-            maker = ""
+                try:
+                    idx, item = future.result()
+                    if item is not None:
+                        results_by_idx[idx] = item
+                except Exception:
+                    pass
 
-            if is_img:
-                size_tup = get_image_size(full_path)
-                if size_tup:
-                    resolution = f"{size_tup[0]}x{size_tup[1]}"
-                maker = get_image_maker(full_path)
-            elif is_vid:
-                meta = get_video_metadata(full_path)
-                if meta and "resolution" in meta:
-                    resolution = f"{meta['resolution']}"
+                completed += 1
+                if progress_cb:
+                    now = time.monotonic()
+                    if completed == total_files or (now - last_report_time) >= 0.05:
+                        progress_cb(completed, total_files)
+                        last_report_time = now
 
-            item = OrganizePlanItem(
-                file_path=full_path,
-                file_name=fname,
-                file_size=fsize,
-                date_result=date_res,
-                destination_dir=dest_subdir,
-                target_path=target_file_path,
-                is_video=is_vid,
-                is_image=is_img,
-                resolution=resolution,
-                maker=maker,
-                action_type=action_type
-            )
-            plan.append(item)
-
-            if progress_cb:
-                progress_cb(idx + 1, total_files)
-
+        # Preserve deterministic ordering matching directory traversal
+        plan = [results_by_idx[i] for i in sorted(results_by_idx.keys())]
         return plan
 
     @staticmethod
@@ -438,15 +623,18 @@ class FileOrganizerEngine:
         max_workers: int = 0
     ) -> OrganizeStats:
         """
-        Execute the organization plan and record transactions into the database.
+        Execute the organization plan in parallel using `ThreadPoolExecutor` and
+        record transactions into the thread-safe SQLite database.
 
         Preconditions:
         - If action_type is 'copy', verifies free disk capacity before starting.
 
-        Execution loop:
-        - Transfers each item safely (moving or copying) with collision handling.
-        - Calculates Blake2b hash for database indexing.
-        - Emits progress and status callbacks.
+        Parallel execution:
+        - Pre-creates unique destination subdirectories before spawning workers.
+        - Worker threads concurrently compute Blake2b hashes and perform `shutil.copy2`
+          or `shutil.move`, synchronizing only on atomic collision filename reservation
+          (`_copyN`) and SQLite catalog writes.
+        - Throttles progress/status callbacks to keep GUI responsive on large archives.
         - Closes and commits the session in `<target_dir>/.db/album.db`.
 
         Args:
@@ -458,6 +646,7 @@ class FileOrganizerEngine:
             progress_cb (Optional[Callable[[int, int], None]]): Callback for (completed_count, total_count).
             status_cb (Optional[Callable[[str], None]]): Callback for high-level status messages.
             log_cb (Optional[Callable[[str], None]]): Callback for detailed log output.
+            max_workers (int): Number of parallel worker threads (defaults to AppSettings.worker_threads).
 
         Returns:
             OrganizeStats: Summary statistics of the completed run.
@@ -469,14 +658,16 @@ class FileOrganizerEngine:
         stats.total_scanned = len(plan)
         target_abs = os.path.abspath(target_dir)
 
+        pending_items = [item for item in plan if item.status not in ("organized", "skipped")]
+
         # 1. Disk space check if action_type is copy
         if action_type == "copy":
-            total_bytes_needed = sum(item.file_size for item in plan)
+            total_bytes_needed = sum(item.file_size for item in pending_items)
             has_space, req, free = check_disk_space(target_abs, total_bytes_needed)
             if not has_space:
                 raise InsufficientDiskSpaceError(req, free)
 
-        # 2. Initialize database in target/.db/album.db
+        # 2. Initialize thread-safe database in target/.db/album.db
         db = OrganizerDatabase(target_abs)
         source_dir = os.path.dirname(plan[0].file_path) if plan else target_abs
         session_id = db.start_session(
@@ -486,81 +677,147 @@ class FileOrganizerEngine:
             action_type=action_type
         )
 
-        try:
-            for idx, item in enumerate(plan):
-                if cancel_event and cancel_event.is_set():
-                    if status_cb:
-                        status_cb("Organization stopped by user.")
-                    break
+        # Pre-create destination folders to minimize os.makedirs contention across threads
+        unique_dest_dirs = {item.destination_dir for item in pending_items}
+        for d in unique_dest_dirs:
+            ensure_directory(d)
 
-                stats.total_processed += 1
-                src_path = item.file_path
-                dst_dir = item.destination_dir
+        total_items = len(plan)
+        already_done = total_items - len(pending_items)
+        completed_count = already_done
 
-                try:
-                    f_hash = calculate_file_hash(src_path)
-                except Exception as e:
-                    f_hash = ""
+        workers = max_workers if max_workers > 0 else AppSettings.instance().worker_threads
+        workers = max(1, min(workers, max(1, len(pending_items))))
 
-                try:
-                    if action_type == "copy":
-                        success, final_dst, detail = safe_copy_file(src_path, dst_dir)
-                        if success:
+        collision_lock = threading.Lock()
+        stats_lock = threading.Lock()
+        reserved_paths: Set[str] = set()
+        last_report_time = [0.0]
+
+        def _process_item(item: OrganizePlanItem) -> None:
+            nonlocal completed_count
+            if cancel_event and cancel_event.is_set():
+                return
+
+            src_path = item.file_path
+            dst_dir = item.destination_dir
+
+            try:
+                f_hash = calculate_file_hash(src_path)
+            except Exception:
+                f_hash = ""
+
+            try:
+                if action_type == "copy":
+                    success, final_dst, detail = safe_copy_file(
+                        src_path,
+                        dst_dir,
+                        src_hash=f_hash,
+                        reserved_paths=reserved_paths,
+                        collision_lock=collision_lock,
+                    )
+                    if success:
+                        item.status = "organized"
+                        item.target_path = final_dst
+                        db.log_action(session_id, src_path, "copied", f"Copied to {final_dst}")
+                        with stats_lock:
+                            stats.total_processed += 1
                             stats.copied += 1
                             stats.total_bytes += item.file_size
-                            item.status = "organized"
-                            item.target_path = final_dst
-                            db.log_action(session_id, src_path, "copied", f"Copied to {final_dst}")
-                        else:
+                    else:
+                        item.status = "skipped"
+                        db.log_action(session_id, src_path, "skipped", detail)
+                        with stats_lock:
+                            stats.total_processed += 1
                             stats.skipped += 1
-                            item.status = "skipped"
-                            db.log_action(session_id, src_path, "skipped", detail)
-                    else:  # move
-                        success, final_dst, detail = safe_move_file(src_path, dst_dir)
-                        if success:
+                else:  # move
+                    success, final_dst, detail = safe_move_file(
+                        src_path,
+                        dst_dir,
+                        reserved_paths=reserved_paths,
+                        collision_lock=collision_lock,
+                    )
+                    if success:
+                        item.status = "organized"
+                        item.target_path = final_dst
+                        db.log_action(session_id, src_path, "moved", f"Moved to {final_dst}")
+                        with stats_lock:
+                            stats.total_processed += 1
                             stats.moved += 1
                             stats.total_bytes += item.file_size
-                            item.status = "organized"
-                            item.target_path = final_dst
-                            db.log_action(session_id, src_path, "moved", f"Moved to {final_dst}")
-                        else:
+                    else:
+                        item.status = "skipped"
+                        db.log_action(session_id, src_path, "skipped", detail)
+                        with stats_lock:
+                            stats.total_processed += 1
                             stats.skipped += 1
-                            item.status = "skipped"
-                            db.log_action(session_id, src_path, "skipped", detail)
 
-                    # Record in DB
-                    db.record_organized_file(
-                        file_name=item.file_name,
-                        original_path=src_path,
-                        organized_path=item.target_path,
-                        file_size=item.file_size,
-                        file_hash=f_hash,
-                        date_taken=item.date_result.date,
-                        date_source=item.date_result.source,
-                        is_video=item.is_video,
-                        resolution=item.resolution,
-                        maker=item.maker,
-                        status=item.status
-                    )
+                # Thread-safe record in DB
+                db.record_organized_file(
+                    file_name=item.file_name,
+                    original_path=src_path,
+                    organized_path=item.target_path,
+                    file_size=item.file_size,
+                    file_hash=f_hash,
+                    date_taken=item.date_result.date,
+                    date_source=item.date_result.source,
+                    is_video=item.is_video,
+                    resolution=item.resolution,
+                    maker=item.maker,
+                    status=item.status
+                )
 
-                    msg = f"{'Copied' if action_type == 'copy' else 'Moved'}: {item.file_name} -> {os.path.relpath(item.target_path, target_abs)}"
+                verb = "Copied" if action_type == "copy" else "Moved"
+                if item.status == "skipped":
+                    verb = "Skipped"
+                msg = f"{verb}: {item.file_name} -> {os.path.relpath(item.target_path, target_abs)}"
+
+                with stats_lock:
+                    completed_count += 1
+                    curr = completed_count
+                    now = time.monotonic()
+                    should_emit_ui = (curr == total_items) or ((now - last_report_time[0]) >= 0.05)
+                    if should_emit_ui:
+                        last_report_time[0] = now
+
+                if should_emit_ui:
                     if status_cb:
                         status_cb(msg)
-                    if log_cb:
-                        log_cb(msg)
+                    if progress_cb:
+                        progress_cb(curr, total_items)
+                if log_cb:
+                    log_cb(msg)
 
-                except Exception as err:
+            except Exception as err:
+                err_msg = f"Error processing {src_path}: {err}"
+                item.status = "error"
+                db.log_action(session_id, src_path, "error", str(err))
+                with stats_lock:
+                    stats.total_processed += 1
                     stats.errors += 1
-                    item.status = "error"
-                    err_msg = f"Error processing {src_path}: {err}"
                     stats.details.append(err_msg)
-                    db.log_action(session_id, src_path, "error", str(err))
-                    if log_cb:
-                        log_cb(err_msg)
-
+                    completed_count += 1
+                    curr = completed_count
+                if log_cb:
+                    log_cb(err_msg)
                 if progress_cb:
-                    progress_cb(idx + 1, len(plan))
+                    progress_cb(curr, total_items)
 
+        try:
+            if pending_items:
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures = [executor.submit(_process_item, item) for item in pending_items]
+                    for future in as_completed(futures):
+                        if cancel_event and cancel_event.is_set():
+                            for f in futures:
+                                f.cancel()
+                            if status_cb:
+                                status_cb("Organization stopped by user.")
+                            break
+                        try:
+                            future.result()
+                        except Exception:
+                            pass
         finally:
             db.finish_session(
                 session_id=session_id,
@@ -576,7 +833,7 @@ class FileOrganizerEngine:
 
 class OrganizerWorker(QThread):
     """
-    PyQt6 background worker thread for non-blocking analysis and organization execution.
+    PyQt6 background worker thread for non-blocking parallel analysis and organization execution.
 
     Signals:
         analysis_started (str): Emitted when a scan or execution starts with description.
@@ -605,6 +862,7 @@ class OrganizerWorker(QThread):
         action_type: str = "copy",
         operation: str = "organize",  # "analyze" or "organize"
         max_workers: int = 0,
+        existing_plan: Optional[List[OrganizePlanItem]] = None,
         parent=None
     ):
         """
@@ -617,6 +875,8 @@ class OrganizerWorker(QThread):
             action_type (str): Transfer method ('copy' or 'move').
             operation (str): Operational mode ('analyze' for preview plan, 'organize' for execution).
             max_workers (int): Number of parallel worker threads (defaults to AppSettings.worker_threads).
+            existing_plan (Optional[List[OrganizePlanItem]]): Pre-analyzed plan to reuse during
+                'organize' operation without scanning the directory a second time.
             parent (Optional[QObject]): Parent Qt object.
         """
         super().__init__(parent)
@@ -626,6 +886,7 @@ class OrganizerWorker(QThread):
         self.action_type = action_type
         self.operation = operation
         self.max_workers = max_workers if max_workers > 0 else AppSettings.instance().worker_threads
+        self.existing_plan = existing_plan
         self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
@@ -636,12 +897,12 @@ class OrganizerWorker(QThread):
         """
         Main execution loop in dedicated worker thread.
 
-        Executes analysis or organization based on `self.operation`, catching errors
-        and emitting corresponding Qt signals.
+        Executes parallel analysis or organization based on `self.operation`, reusing
+        `self.existing_plan` if supplied, and emitting corresponding Qt signals.
         """
         try:
             if self.operation == "analyze":
-                self.analysis_started.emit(f"Scanning '{self.source_dir}'...")
+                self.analysis_started.emit(f"Scanning '{self.source_dir}' ({self.max_workers} threads)...")
                 plan = FileOrganizerEngine.scan_and_plan(
                     source_dir=self.source_dir,
                     target_dir=self.target_dir,
@@ -654,21 +915,26 @@ class OrganizerWorker(QThread):
                 self.plan_ready.emit(plan)
                 self.status_message.emit(f"Scan complete. Found {len(plan)} files.")
             else:
-                self.analysis_started.emit(f"Organizing files to '{self.target_dir}'...")
-                # 1. Build plan first
-                plan = FileOrganizerEngine.scan_and_plan(
-                    source_dir=self.source_dir,
-                    target_dir=self.target_dir,
-                    mode=self.mode,
-                    action_type=self.action_type,
-                    cancel_event=self._cancel_event,
-                    progress_cb=self.progress_updated.emit,
-                    max_workers=self.max_workers
-                )
-                if self._cancel_event.is_set():
-                    return
+                self.analysis_started.emit(f"Organizing files to '{self.target_dir}' ({self.max_workers} threads)...")
+                # 1. Reuse existing preview plan if available, otherwise scan now
+                if self.existing_plan:
+                    plan = self.existing_plan
+                    for item in plan:
+                        item.action_type = self.action_type
+                else:
+                    plan = FileOrganizerEngine.scan_and_plan(
+                        source_dir=self.source_dir,
+                        target_dir=self.target_dir,
+                        mode=self.mode,
+                        action_type=self.action_type,
+                        cancel_event=self._cancel_event,
+                        progress_cb=self.progress_updated.emit,
+                        max_workers=self.max_workers
+                    )
+                    if self._cancel_event.is_set():
+                        return
 
-                # 2. Execute plan
+                # 2. Execute plan in parallel
                 stats = FileOrganizerEngine.execute_plan(
                     plan=plan,
                     target_dir=self.target_dir,

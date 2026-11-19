@@ -7,10 +7,12 @@ database located inside `<target_dir>/.db/album.db`. The database tracks:
 - Sessions of organization (mode, start/end timestamps, counters).
 - Detailed audit logs of all actions (copied, moved, skipped, error).
 - Actuality verification (checking if cataloged files still exist on disk).
+- Thread-safe concurrent access via `check_same_thread=False` and `threading.RLock`.
 """
 
 import os
 import sqlite3
+import threading
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -19,8 +21,9 @@ class OrganizerDatabase:
     """
     Manages the SQLite media catalog stored inside `<target_dir>/.db/album.db`.
 
-    Provides safe transactional database operations, automatic table/index schema creation,
-    actuality verification of cataloged files against disk state, and session logging.
+    Provides thread-safe transactional database operations, automatic table/index
+    schema creation, actuality verification of cataloged files against disk state,
+    and session logging.
 
     Attributes:
         DB_FOLDER_NAME (str): Subdirectory name housing the catalog ('.db').
@@ -42,6 +45,7 @@ class OrganizerDatabase:
         self.target_dir = os.path.abspath(target_dir)
         self.db_dir = os.path.join(self.target_dir, self.DB_FOLDER_NAME)
         self.db_path = os.path.join(self.db_dir, self.DB_FILE_NAME)
+        self._lock = threading.RLock()
         self._ensure_dir()
         self._conn: Optional[sqlite3.Connection] = None
         self.init_schema()
@@ -107,21 +111,24 @@ class OrganizerDatabase:
 
     def get_connection(self) -> sqlite3.Connection:
         """
-        Retrieve or open the active SQLite connection with row_factory set to sqlite3.Row.
+        Retrieve or open the active SQLite connection with `check_same_thread=False`
+        and `row_factory` set to `sqlite3.Row`.
 
         Returns:
-            sqlite3.Connection: Active database connection.
+            sqlite3.Connection: Active thread-safe database connection.
         """
-        if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path)
-            self._conn.row_factory = sqlite3.Row
-        return self._conn
+        with self._lock:
+            if self._conn is None:
+                self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                self._conn.row_factory = sqlite3.Row
+            return self._conn
 
     def close(self) -> None:
         """Close the active database connection if open."""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        with self._lock:
+            if self._conn:
+                self._conn.close()
+                self._conn = None
 
     def __enter__(self):
         """Context manager entry point."""
@@ -140,56 +147,57 @@ class OrganizerDatabase:
             - `organizer_sessions`: Tracks executions of organization runs.
             - `organizer_log`: Detailed audit logs of file actions.
         """
-        conn = self.get_connection()
-        with conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS organized_files (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    file_name TEXT NOT NULL,
-                    original_path TEXT NOT NULL,
-                    organized_path TEXT NOT NULL UNIQUE,
-                    file_size INTEGER NOT NULL,
-                    file_hash TEXT NOT NULL,
-                    date_taken TEXT,
-                    date_source TEXT DEFAULT 'none',
-                    is_video INTEGER NOT NULL DEFAULT 0,
-                    resolution TEXT DEFAULT '',
-                    maker TEXT DEFAULT '',
-                    organized_at TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'organized'
-                )
-            """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_org_hash ON organized_files(file_hash)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_org_path ON organized_files(organized_path)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_org_date ON organized_files(date_taken)")
+        with self._lock:
+            conn = self.get_connection()
+            with conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS organized_files (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        file_name TEXT NOT NULL,
+                        original_path TEXT NOT NULL,
+                        organized_path TEXT NOT NULL UNIQUE,
+                        file_size INTEGER NOT NULL,
+                        file_hash TEXT NOT NULL,
+                        date_taken TEXT,
+                        date_source TEXT DEFAULT 'none',
+                        is_video INTEGER NOT NULL DEFAULT 0,
+                        resolution TEXT DEFAULT '',
+                        maker TEXT DEFAULT '',
+                        organized_at TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'organized'
+                    )
+                """)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_org_hash ON organized_files(file_hash)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_org_path ON organized_files(organized_path)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_org_date ON organized_files(date_taken)")
 
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS organizer_sessions (
-                    session_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    start_time TEXT NOT NULL,
-                    end_time TEXT,
-                    source_dir TEXT NOT NULL,
-                    target_dir TEXT NOT NULL,
-                    mode TEXT NOT NULL,
-                    action_type TEXT NOT NULL,
-                    total_processed INTEGER DEFAULT 0,
-                    files_organized INTEGER DEFAULT 0,
-                    files_skipped INTEGER DEFAULT 0,
-                    files_errors INTEGER DEFAULT 0
-                )
-            """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS organizer_sessions (
+                        session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        start_time TEXT NOT NULL,
+                        end_time TEXT,
+                        source_dir TEXT NOT NULL,
+                        target_dir TEXT NOT NULL,
+                        mode TEXT NOT NULL,
+                        action_type TEXT NOT NULL,
+                        total_processed INTEGER DEFAULT 0,
+                        files_organized INTEGER DEFAULT 0,
+                        files_skipped INTEGER DEFAULT 0,
+                        files_errors INTEGER DEFAULT 0
+                    )
+                """)
 
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS organizer_log (
-                    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id INTEGER,
-                    file_path TEXT NOT NULL,
-                    action TEXT NOT NULL,
-                    message TEXT DEFAULT '',
-                    timestamp TEXT NOT NULL,
-                    FOREIGN KEY (session_id) REFERENCES organizer_sessions (session_id)
-                )
-            """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS organizer_log (
+                        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id INTEGER,
+                        file_path TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        message TEXT DEFAULT '',
+                        timestamp TEXT NOT NULL,
+                        FOREIGN KEY (session_id) REFERENCES organizer_sessions (session_id)
+                    )
+                """)
 
     def start_session(
         self,
@@ -211,16 +219,17 @@ class OrganizerDatabase:
             int: The unique identifier `session_id` of the newly created session.
         """
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn = self.get_connection()
-        with conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO organizer_sessions (start_time, source_dir, target_dir, mode, action_type)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (now_str, os.path.abspath(source_dir), os.path.abspath(target_dir), mode, action_type)
-            )
-            return cursor.lastrowid
+        with self._lock:
+            conn = self.get_connection()
+            with conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO organizer_sessions (start_time, source_dir, target_dir, mode, action_type)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (now_str, os.path.abspath(source_dir), os.path.abspath(target_dir), mode, action_type)
+                )
+                return cursor.lastrowid
 
     def finish_session(
         self,
@@ -241,16 +250,17 @@ class OrganizerDatabase:
             files_errors (int): Number of files that encountered errors.
         """
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn = self.get_connection()
-        with conn:
-            conn.execute(
-                """
-                UPDATE organizer_sessions
-                SET end_time = ?, total_processed = ?, files_organized = ?, files_skipped = ?, files_errors = ?
-                WHERE session_id = ?
-                """,
-                (now_str, total_processed, files_organized, files_skipped, files_errors, session_id)
-            )
+        with self._lock:
+            conn = self.get_connection()
+            with conn:
+                conn.execute(
+                    """
+                    UPDATE organizer_sessions
+                    SET end_time = ?, total_processed = ?, files_organized = ?, files_skipped = ?, files_errors = ?
+                    WHERE session_id = ?
+                    """,
+                    (now_str, total_processed, files_organized, files_skipped, files_errors, session_id)
+                )
 
     def log_action(
         self,
@@ -269,15 +279,16 @@ class OrganizerDatabase:
             message (str, optional): Descriptive details or error explanation. Defaults to "".
         """
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn = self.get_connection()
-        with conn:
-            conn.execute(
-                """
-                INSERT INTO organizer_log (session_id, file_path, action, message, timestamp)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (session_id, file_path, action, message, now_str)
-            )
+        with self._lock:
+            conn = self.get_connection()
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO organizer_log (session_id, file_path, action, message, timestamp)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (session_id, file_path, action, message, now_str)
+                )
 
     def record_organized_file(
         self,
@@ -311,29 +322,30 @@ class OrganizerDatabase:
         """
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         dt_str = date_taken.strftime("%Y-%m-%d %H:%M:%S") if date_taken else None
-        conn = self.get_connection()
-        with conn:
-            conn.execute(
-                """
-                INSERT INTO organized_files
-                (file_name, original_path, organized_path, file_size, file_hash, date_taken, date_source,
-                 is_video, resolution, maker, organized_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(organized_path) DO UPDATE SET
-                    original_path = excluded.original_path,
-                    file_size = excluded.file_size,
-                    file_hash = excluded.file_hash,
-                    date_taken = excluded.date_taken,
-                    date_source = excluded.date_source,
-                    is_video = excluded.is_video,
-                    resolution = excluded.resolution,
-                    maker = excluded.maker,
-                    organized_at = excluded.organized_at,
-                    status = excluded.status
-                """,
-                (file_name, original_path, organized_path, file_size, file_hash, dt_str, date_source,
-                 1 if is_video else 0, resolution, maker, now_str, status)
-            )
+        with self._lock:
+            conn = self.get_connection()
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO organized_files
+                    (file_name, original_path, organized_path, file_size, file_hash, date_taken, date_source,
+                     is_video, resolution, maker, organized_at, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(organized_path) DO UPDATE SET
+                        original_path = excluded.original_path,
+                        file_size = excluded.file_size,
+                        file_hash = excluded.file_hash,
+                        date_taken = excluded.date_taken,
+                        date_source = excluded.date_source,
+                        is_video = excluded.is_video,
+                        resolution = excluded.resolution,
+                        maker = excluded.maker,
+                        organized_at = excluded.organized_at,
+                        status = excluded.status
+                    """,
+                    (file_name, original_path, organized_path, file_size, file_hash, dt_str, date_source,
+                     1 if is_video else 0, resolution, maker, now_str, status)
+                )
 
     def find_by_hash(self, file_hash: str) -> Optional[dict]:
         """
@@ -345,10 +357,11 @@ class OrganizerDatabase:
         Returns:
             Optional[dict]: Dictionary representation of the matching record, or None if not found.
         """
-        conn = self.get_connection()
-        cursor = conn.execute("SELECT * FROM organized_files WHERE file_hash = ? LIMIT 1", (file_hash,))
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with self._lock:
+            conn = self.get_connection()
+            cursor = conn.execute("SELECT * FROM organized_files WHERE file_hash = ? LIMIT 1", (file_hash,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
     def find_by_organized_path(self, organized_path: str) -> Optional[dict]:
         """
@@ -360,10 +373,11 @@ class OrganizerDatabase:
         Returns:
             Optional[dict]: Dictionary representation of the matching record, or None if not found.
         """
-        conn = self.get_connection()
-        cursor = conn.execute("SELECT * FROM organized_files WHERE organized_path = ? LIMIT 1", (organized_path,))
-        row = cursor.fetchone()
-        return dict(row) if row else None
+        with self._lock:
+            conn = self.get_connection()
+            cursor = conn.execute("SELECT * FROM organized_files WHERE organized_path = ? LIMIT 1", (organized_path,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
     def get_all_organized_files(self) -> List[dict]:
         """
@@ -372,9 +386,10 @@ class OrganizerDatabase:
         Returns:
             List[dict]: List of all records as dictionaries.
         """
-        conn = self.get_connection()
-        cursor = conn.execute("SELECT * FROM organized_files")
-        return [dict(row) for row in cursor.fetchall()]
+        with self._lock:
+            conn = self.get_connection()
+            cursor = conn.execute("SELECT * FROM organized_files")
+            return [dict(row) for row in cursor.fetchall()]
 
     def count_organized_files(self) -> int:
         """
@@ -383,9 +398,10 @@ class OrganizerDatabase:
         Returns:
             int: Total record count.
         """
-        conn = self.get_connection()
-        cursor = conn.execute("SELECT COUNT(*) FROM organized_files")
-        return cursor.fetchone()[0]
+        with self._lock:
+            conn = self.get_connection()
+            cursor = conn.execute("SELECT COUNT(*) FROM organized_files")
+            return cursor.fetchone()[0]
 
     def verify_catalog_actuality(self) -> Dict[str, Any]:
         """
@@ -405,41 +421,42 @@ class OrganizerDatabase:
                 - 'modified_count': Files on disk whose sizes differ from DB.
                 - 'missing_files': List of filesystem paths that could not be found.
         """
-        conn = self.get_connection()
-        all_records = self.get_all_organized_files()
+        with self._lock:
+            conn = self.get_connection()
+            all_records = self.get_all_organized_files()
 
-        valid_count = 0
-        missing_count = 0
-        modified_count = 0
-        missing_files = []
+            valid_count = 0
+            missing_count = 0
+            modified_count = 0
+            missing_files = []
 
-        with conn:
-            for rec in all_records:
-                file_path = rec["organized_path"]
-                record_id = rec["id"]
-                if not os.path.isfile(file_path):
-                    missing_count += 1
-                    missing_files.append(file_path)
-                    conn.execute("UPDATE organized_files SET status = 'missing' WHERE id = ?", (record_id,))
-                else:
-                    try:
-                        curr_size = os.path.getsize(file_path)
-                        if curr_size != rec["file_size"]:
-                            modified_count += 1
-                            conn.execute("UPDATE organized_files SET status = 'modified' WHERE id = ?", (record_id,))
-                        else:
-                            valid_count += 1
-                            if rec["status"] != "organized":
-                                conn.execute("UPDATE organized_files SET status = 'organized' WHERE id = ?", (record_id,))
-                    except OSError:
+            with conn:
+                for rec in all_records:
+                    file_path = rec["organized_path"]
+                    record_id = rec["id"]
+                    if not os.path.isfile(file_path):
                         missing_count += 1
                         missing_files.append(file_path)
                         conn.execute("UPDATE organized_files SET status = 'missing' WHERE id = ?", (record_id,))
+                    else:
+                        try:
+                            curr_size = os.path.getsize(file_path)
+                            if curr_size != rec["file_size"]:
+                                modified_count += 1
+                                conn.execute("UPDATE organized_files SET status = 'modified' WHERE id = ?", (record_id,))
+                            else:
+                                valid_count += 1
+                                if rec["status"] != "organized":
+                                    conn.execute("UPDATE organized_files SET status = 'organized' WHERE id = ?", (record_id,))
+                        except OSError:
+                            missing_count += 1
+                            missing_files.append(file_path)
+                            conn.execute("UPDATE organized_files SET status = 'missing' WHERE id = ?", (record_id,))
 
-        return {
-            "total_records": len(all_records),
-            "valid_count": valid_count,
-            "missing_count": missing_count,
-            "modified_count": modified_count,
-            "missing_files": missing_files,
-        }
+            return {
+                "total_records": len(all_records),
+                "valid_count": valid_count,
+                "missing_count": missing_count,
+                "modified_count": modified_count,
+                "missing_files": missing_files,
+            }

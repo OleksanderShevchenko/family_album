@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from src.family_album_lib.organizer_db import OrganizerDatabase
@@ -107,6 +108,37 @@ class TestOrganizerDatabase(unittest.TestCase):
             self.assertEqual(stats["valid_count"], 1)
             self.assertEqual(stats["missing_count"], 1)
             self.assertIn(missing_file, stats["missing_files"])
+
+    def test_multithreaded_concurrent_writes(self):
+        """Verify OrganizerDatabase safely handles concurrent writes from multiple threads."""
+        with OrganizerDatabase(self.test_dir) as db:
+            session_id = db.start_session(
+                source_dir=self.test_dir,
+                target_dir=self.test_dir,
+                mode="new_organization",
+                action_type="copy",
+            )
+
+            def write_item(i: int) -> None:
+                db.record_organized_file(
+                    file_name=f"IMG_{i:04d}.jpg",
+                    original_path=f"C:/src/IMG_{i:04d}.jpg",
+                    organized_path=f"C:/dst/2023/05/IMG_{i:04d}.jpg",
+                    file_size=1024 + i,
+                    file_hash=f"hash_{i:04d}",
+                    date_taken=datetime(2023, 5, 14, 10, 0, i % 60),
+                    date_source="filename",
+                    is_video=False,
+                    resolution="1920x1080",
+                    maker="Nikon",
+                )
+                db.log_action(session_id, f"C:/src/IMG_{i:04d}.jpg", "copied", f"Item {i}")
+
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                list(executor.map(write_item, range(40)))
+
+            self.assertEqual(db.count_organized_files(), 40)
+            self.assertIsNotNone(db.find_by_hash("hash_0039"))
 
 
 if __name__ == "__main__":

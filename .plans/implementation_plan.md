@@ -43,13 +43,13 @@ We have introduced a feature to organize family photos and videos into a structu
 - [x] Add thread-safety (`check_same_thread=False` and `RLock`) to `OrganizerDatabase` (`organizer_db.py`).
 - [x] Verify and expand unit tests (`test_video_utils.py`, `test_image_utils.py`, `test_date_extractor.py`, `test_organizer_db.py`).
 
-### Step 3: Multithreaded Analysis & Organization Pipeline (`ThreadPoolExecutor`) — `[PENDING]`
-- [ ] Refactor `FileOrganizerEngine.scan_and_plan()` to analyze files concurrently using `ThreadPoolExecutor(max_workers=...)`.
-- [ ] Refactor `FileOrganizerEngine.execute_plan()` to hash and copy/move files concurrently using `ThreadPoolExecutor(max_workers=...)` with per-destination lock around filename collision disambiguation.
-- [ ] Reuse existing preview plan when starting organization from UI.
-- [ ] Add unit tests for multithreaded execution in `test_file_organizer_engine.py`.
+### Step 3: Multithreaded Analysis & Organization Pipeline (`ThreadPoolExecutor`) — `[COMPLETED]`
+- [x] Refactor `FileOrganizerEngine.scan_and_plan()` to analyze files concurrently using `ThreadPoolExecutor(max_workers=...)` with single-pass `_inspect_single_file()` and throttled progress callbacks.
+- [x] Refactor `FileOrganizerEngine.execute_plan()` to hash and copy/move files concurrently using `ThreadPoolExecutor(max_workers=...)` with atomic `_reserve_unique_destination()` + `collision_lock` around filename collision disambiguation.
+- [x] Reuse existing preview plan (`existing_plan`) when starting organization from UI and optimize large table rendering / progress updates in `FileOrganizer`.
+- [x] Add 4 unit tests for multithreaded execution, collision stress testing, plan reuse, and MoviePy bypass in `test_file_organizer_engine.py` (54 passed).
 
-### Step 4: Memento Pattern for File Organizer (Pause / Save State / Resume) — `[PENDING]`
+### Step 4: Memento Pattern for File Organizer (Pause / Save State / Resume) — `[NEXT]`
 - [ ] Create `src/family_album_lib/organizer_memento.py` (`OrganizerStatus`, `OrganizerMemento`, `OrganizerSaveManager`) supporting both `analyze` and `organize` phases.
 - [ ] Add `Save State` and `Resume` buttons to `FileOrganizer` widget and support pausing/resuming from the exact stopping point.
 - [ ] Add unit tests in `tests/test_organizer_memento.py` and `test_file_organizer_widget.py`.

@@ -3,7 +3,7 @@ Module for smart date extraction from media files (photos, videos, documents).
 
 This module implements a priority-based date extraction strategy:
 1. Filename pattern parsing (highest priority, immune to filesystem copy/download timestamp distortion).
-2. Embedded EXIF tags for images (DateTimeOriginal, DateTimeDigitized, DateTime) via Pillow & exifread.
+2. Embedded EXIF tags for images (DateTimeOriginal, DateTimeDigitized, DateTime) via fast Pillow IFD lookup with lightweight exifread fallback.
 3. Embedded container metadata for videos (QuickTime / MP4 creation_time) via OpenCV & MoviePy.
 4. Optional filesystem creation / modification timestamps (fallback).
 5. Unresolved files without reliable dates are categorized with source='none' for 'No_Date/' routing.
@@ -15,12 +15,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
+import exifread
+from PIL import Image
+
 from src.family_album.utility_functions.image_utils import (
+    has_image_extension,
     is_image_file,
-    _get_image_info,
-    _get_image_info_pil,
 )
 from src.family_album.utility_functions.video_utils import (
+    has_video_extension,
     is_file_a_video,
     get_video_metadata,
 )
@@ -204,9 +207,47 @@ def extract_date_from_filename(filename: str) -> Optional[datetime]:
     return None
 
 
+def extract_date_from_pil_exif(exif) -> Optional[datetime]:
+    """
+    Extract earliest valid capture datetime directly from an already-loaded Pillow Exif object.
+
+    Inspects both top-level IFD0 tags (306: DateTime, 36867: DateTimeOriginal,
+    36868: DateTimeDigitized, 50971: PreviewDateTime) and the Exif Sub-IFD (`0x8769`).
+
+    Args:
+        exif: Pillow `Image.Exif` object obtained via `image.getexif()`.
+
+    Returns:
+        Optional[datetime]: Earliest valid datetime found, or None.
+    """
+    if not exif:
+        return None
+
+    dates = []
+    for tag_id in (36867, 36868, 306, 50971):
+        if tag_id in exif:
+            dt = _parse_exif_datestring(str(exif[tag_id]).strip())
+            if dt:
+                dates.append(dt)
+
+    try:
+        exif_ifd = exif.get_ifd(0x8769)
+        if exif_ifd:
+            for tag_id in (36867, 36868, 50971):
+                if tag_id in exif_ifd:
+                    dt = _parse_exif_datestring(str(exif_ifd[tag_id]).strip())
+                    if dt:
+                        dates.append(dt)
+    except Exception:
+        pass
+
+    return min(dates) if dates else None
+
+
 def extract_date_from_exif(file_path: str) -> Optional[datetime]:
     """
-    Extracts datetime from image EXIF metadata tags using Pillow and exifread.
+    Extracts datetime from image EXIF metadata tags using fast Pillow IFD lookup
+    with lightweight fallback to exifread (`details=False`).
 
     Inspects standard EXIF date tags including DateTimeOriginal, DateTimeDigitized,
     and Image DateTime, selecting the earliest valid capture date.
@@ -220,24 +261,20 @@ def extract_date_from_exif(file_path: str) -> Optional[datetime]:
     if not os.path.isfile(file_path):
         return None
 
-    dates = []
-
-    # 1. Check Pillow EXIF
+    # 1. Fast path: Pillow EXIF + Exif Sub-IFD (0x8769)
     try:
-        pil_exif = _get_image_info_pil(file_path)
-        # 306: DateTime, 36867: DateTimeOriginal, 36868: DateTimeDigitized, 50971: PreviewDateTime
-        for tag_id in (36867, 36868, 306, 50971):
-            if tag_id in pil_exif:
-                val = str(pil_exif[tag_id]).strip()
-                dt = _parse_exif_datestring(val)
-                if dt:
-                    dates.append(dt)
+        with Image.open(file_path) as image:
+            pil_dt = extract_date_from_pil_exif(image.getexif())
+            if pil_dt:
+                return pil_dt
     except Exception:
         pass
 
-    # 2. Check Exifread tags
+    # 2. Lightweight fallback: Exifread with details=False (skips heavy MakerNote parsing)
+    dates = []
     try:
-        er_tags = _get_image_info(file_path)
+        with open(file_path, 'rb') as f:
+            er_tags = exifread.process_file(f, details=False)
         for tag_name in ('EXIF DateTimeOriginal', 'EXIF DateTimeDigitized', 'Image DateTime'):
             if tag_name in er_tags:
                 val = str(er_tags[tag_name]).strip()
@@ -287,7 +324,7 @@ def extract_date_from_video(file_path: str) -> Optional[datetime]:
     Returns:
         Optional[datetime]: The parsed video creation datetime, or None if metadata is absent.
     """
-    if not os.path.isfile(file_path):
+    if not os.path.isfile(file_path) or not has_video_extension(file_path):
         return None
 
     try:
@@ -295,11 +332,9 @@ def extract_date_from_video(file_path: str) -> Optional[datetime]:
         if meta and 'infos' in meta and 'metadata' in meta['infos']:
             raw_time = meta['infos']['metadata'].get('creation_time')
             if raw_time:
+                clean_str = str(raw_time).strip().split('.')[0].rstrip('Z')
                 for fmt in ('%Y:%m:%d %H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
                     try:
-                        clean_str = str(raw_time).strip()
-                        if '.' in clean_str:
-                            clean_str = clean_str.split('.')[0]
                         dt = datetime.strptime(clean_str, fmt)
                         if is_valid_date(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second):
                             return dt
@@ -346,11 +381,11 @@ def extract_media_date(
             return MediaDateResult(date=fn_date, source="filename", detail=f"Extracted from name: {filename}")
 
     # 2. Embedded metadata: EXIF for images or container metadata for videos
-    if is_file_a_video(file_path):
+    if has_video_extension(file_path) and is_file_a_video(file_path):
         v_date = extract_date_from_video(file_path)
         if v_date:
             return MediaDateResult(date=v_date, source="video_metadata", detail="Extracted from video metadata")
-    elif is_image_file(file_path):
+    elif has_image_extension(file_path) or is_image_file(file_path):
         img_date = extract_date_from_exif(file_path)
         if img_date:
             return MediaDateResult(date=img_date, source="exif", detail="Extracted from EXIF DateTimeOriginal")

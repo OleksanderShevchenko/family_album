@@ -1,9 +1,11 @@
 import os
 import unittest
+from unittest.mock import patch
 from datetime import datetime
 
 from src.family_album.utility_functions.date_extractor import (
     extract_date_from_filename,
+    extract_date_from_exif,
     is_valid_date,
     extract_media_date,
     MediaDateResult,
@@ -111,6 +113,15 @@ class TestDateExtractor(unittest.TestCase):
         self.assertFalse(res_no_date.has_date)
         self.assertEqual(res_no_date.year_folder, "No_Date")
         self.assertEqual(res_no_date.month_folder, "")
+
+    def test_fast_exif_extraction_via_pillow_skips_exifread(self):
+        """Standard EXIF DateTimeOriginal in Sub-IFD 0x8769 is extracted via Pillow without invoking exifread."""
+        tests_dir = os.path.dirname(os.path.abspath(__file__))
+        photo_with_exif = os.path.join(tests_dir, "data", "images", "test_photo3.jpg")
+        with patch("src.family_album.utility_functions.date_extractor.exifread.process_file") as mock_er:
+            dt = extract_date_from_exif(photo_with_exif)
+            self.assertEqual(dt, datetime(2024, 2, 23, 11, 24, 48))
+            mock_er.assert_not_called()
 
 
 if __name__ == "__main__":

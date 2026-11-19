@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from src.family_album_lib.file_organizer_engine import (
     FileOrganizerEngine,
+    OrganizerWorker,
     safe_copy_file,
     safe_move_file,
     check_disk_space,
@@ -148,6 +149,131 @@ class TestFileOrganizerEngine(unittest.TestCase):
                     target_dir=self.target_dir,
                     action_type="copy"
                 )
+
+    def test_parallel_scan_and_execute_many_files(self):
+        """Verify multithreaded scan_and_plan and execute_plan handle many files cleanly."""
+        batch_src = os.path.join(self.temp_root, "batch_src")
+        batch_dst = os.path.join(self.temp_root, "batch_dst")
+        for folder_idx in range(6):
+            sub = os.path.join(batch_src, f"dir_{folder_idx}")
+            os.makedirs(sub, exist_ok=True)
+            for file_idx in range(10):
+                fname = f"IMG_2023{folder_idx + 1:02d}{file_idx + 1:02d}_101010_{folder_idx}_{file_idx}.jpg"
+                with open(os.path.join(sub, fname), "wb") as f:
+                    f.write(f"payload_{folder_idx}_{file_idx}".encode("utf-8"))
+
+        plan = FileOrganizerEngine.scan_and_plan(
+            source_dir=batch_src,
+            target_dir=batch_dst,
+            mode="new_organization",
+            action_type="copy",
+            max_workers=8,
+        )
+        self.assertEqual(len(plan), 60)
+
+        stats = FileOrganizerEngine.execute_plan(
+            plan=plan,
+            target_dir=batch_dst,
+            mode="new_organization",
+            action_type="copy",
+            max_workers=8,
+        )
+        self.assertEqual(stats.copied, 60)
+        self.assertEqual(stats.errors, 0)
+        with OrganizerDatabase(batch_dst) as db:
+            self.assertEqual(db.count_organized_files(), 60)
+
+    def test_parallel_move_name_collision_safety(self):
+        """Stress test: 20 threads moving 20 distinct files with identical names to the same target folder."""
+        col_src = os.path.join(self.temp_root, "collision_src")
+        col_dst = os.path.join(self.temp_root, "collision_dst")
+        expected_contents = set()
+        for i in range(20):
+            sub = os.path.join(col_src, f"sub_{i:02d}")
+            os.makedirs(sub, exist_ok=True)
+            content = f"unique_content_number_{i}".encode("utf-8")
+            expected_contents.add(content)
+            with open(os.path.join(sub, "IMG_20230514_120000.jpg"), "wb") as f:
+                f.write(content)
+
+        plan = FileOrganizerEngine.scan_and_plan(
+            source_dir=col_src,
+            target_dir=col_dst,
+            mode="new_organization",
+            action_type="move",
+            max_workers=8,
+        )
+        self.assertEqual(len(plan), 20)
+
+        stats = FileOrganizerEngine.execute_plan(
+            plan=plan,
+            target_dir=col_dst,
+            mode="new_organization",
+            action_type="move",
+            max_workers=8,
+        )
+        self.assertEqual(stats.moved, 20)
+        self.assertEqual(stats.errors, 0)
+
+        dest_folder = os.path.join(col_dst, "2023", "05")
+        arrived_files = os.listdir(dest_folder)
+        self.assertEqual(len(arrived_files), 20)
+
+        actual_contents = set()
+        for fname in arrived_files:
+            with open(os.path.join(dest_folder, fname), "rb") as f:
+                actual_contents.add(f.read())
+        self.assertEqual(actual_contents, expected_contents)
+
+        with OrganizerDatabase(col_dst) as db:
+            self.assertEqual(db.count_organized_files(), 20)
+
+    def test_worker_reuses_existing_plan_without_rescanning(self):
+        """OrganizerWorker reuses pre-built plan during organize operation without calling scan_and_plan again."""
+        plan = FileOrganizerEngine.scan_and_plan(
+            source_dir=self.source_dir,
+            target_dir=self.target_dir,
+            mode="new_organization",
+            action_type="copy",
+            max_workers=4,
+        )
+        worker = OrganizerWorker(
+            source_dir=self.source_dir,
+            target_dir=self.target_dir,
+            mode="new_organization",
+            action_type="copy",
+            operation="organize",
+            max_workers=4,
+            existing_plan=plan,
+        )
+        with patch.object(FileOrganizerEngine, "scan_and_plan") as mock_scan:
+            worker.run()
+            mock_scan.assert_not_called()
+
+        with OrganizerDatabase(self.target_dir) as db:
+            self.assertEqual(db.count_organized_files(), 3)
+
+    def test_single_pass_scan_skips_moviepy_on_dated_videos(self):
+        """Real MP4 videos whose filename already contains a date bypass MoviePy completely."""
+        tests_dir = os.path.dirname(os.path.abspath(__file__))
+        sample_mp4 = os.path.join(tests_dir, "data", "video", "test_2.mp4")
+        vid_src = os.path.join(self.temp_root, "vid_src")
+        vid_dst = os.path.join(self.temp_root, "vid_dst")
+        os.makedirs(vid_src, exist_ok=True)
+        shutil.copy2(sample_mp4, os.path.join(vid_src, "VID_20230514_120000.mp4"))
+
+        with patch("src.family_album.utility_functions.video_utils.VideoFileClip") as mock_clip:
+            plan = FileOrganizerEngine.scan_and_plan(
+                source_dir=vid_src,
+                target_dir=vid_dst,
+                max_workers=4,
+            )
+            mock_clip.assert_not_called()
+
+        self.assertEqual(len(plan), 1)
+        self.assertTrue(plan[0].is_video)
+        self.assertRegex(plan[0].resolution, r"^\d+x\d+$")
+        self.assertEqual(plan[0].date_result.source, "filename")
 
 
 if __name__ == "__main__":

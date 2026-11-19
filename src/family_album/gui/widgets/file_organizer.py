@@ -6,15 +6,17 @@ interface to offer interactive photo and video archive organization:
 - Folder browsing for source and target media repositories.
 - Mode selection: New Organization (into `<source>_organized/`) or Self-Organization (in-place).
 - Action selection: Copy (default for new organization) or Move (mandatory for self-organization).
-- Pre-organization analysis and plan inspection in a responsive QTableView.
+- Pre-organization parallel analysis and plan inspection in a responsive QTableView.
 - Disk capacity validation before copy operations, prompting switch to Move if space is low.
-- Asynchronous threaded execution via OrganizerWorker with live progress and status bars.
+- Asynchronous multithreaded execution via OrganizerWorker with live progress and status bars.
+- Memento-based state pausing, saving (`saves/organizer_save_*.json`), and resuming for
+  both the analysis and organization phases.
 """
 
 import os
-from typing import Optional, List
+from typing import Dict, Optional, List
 
-from PyQt6 import QtWidgets, QtCore, QtGui
+from PyQt6 import QtWidgets
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QStandardItemModel, QStandardItem
 from PyQt6.QtWidgets import QMessageBox, QFileDialog
@@ -22,6 +24,11 @@ from PyQt6.QtWidgets import QMessageBox, QFileDialog
 from src.family_album.gui.widgets.py_ui.file_organizer_ui import Ui_Form
 from src.family_album_lib.app_settings import AppSettings
 from src.family_album_lib.organizer_db import OrganizerDatabase
+from src.family_album_lib.organizer_memento import (
+    OrganizerMemento,
+    OrganizerSaveManager,
+    OrganizerStatus,
+)
 from src.family_album_lib.file_organizer_engine import (
     FileOrganizerEngine,
     OrganizerWorker,
@@ -33,10 +40,12 @@ from src.family_album_lib.file_organizer_engine import (
 
 class FileOrganizer(QtWidgets.QWidget, Ui_Form):
     """
-    Main widget for configuring, previewing, and executing media file organization.
+    Main widget for configuring, previewing, pausing/resuming, and executing media
+    file organization.
 
-    Connects user interface controls to the backend FileOrganizerEngine and displays
-    results in a multi-column table model with real-time progress indicators.
+    Connects user interface controls to the multithreaded FileOrganizerEngine and
+    OrganizerSaveManager (Memento pattern), displaying results in a multi-column
+    table model with real-time progress indicators.
 
     Signals:
         ItemSelected (str): Emitted to notify parent/main window of current operation or status message.
@@ -51,12 +60,13 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
     AnalysisFinished = pyqtSignal(str)
     LogEventEmitted = pyqtSignal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, saves_dir: str = "saves"):
         """
         Initialize the FileOrganizer widget.
 
         Args:
             parent (Optional[QtWidgets.QWidget]): Parent widget or MainWindow instance.
+            saves_dir (str): Directory where Memento state JSON files are stored.
         """
         super().__init__(parent)
         self._parent = parent
@@ -68,6 +78,31 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         self._current_plan: List[OrganizePlanItem] = []
         self._plan_context: Optional[tuple] = None  # (source_dir, target_dir, mode)
         self._max_workers: int = AppSettings.instance().worker_threads
+
+        # Memento state tracking
+        self._save_manager: OrganizerSaveManager = OrganizerSaveManager(saves_dir)
+        self._status: OrganizerStatus = OrganizerStatus.IDLE
+        self._paused_phase: str = ""  # "analyze" or "organize"
+        self._total_discovered_files: int = 0
+        self._accumulated_stats: OrganizeStats = OrganizeStats()
+
+        # Enhance button bar with Memento Save State & Resume buttons (mirrors DuplicationChecker)
+        self.pb_stop.setText("Stop / Pause")
+        self.pb_stop.setToolTip("Pause the active analysis or organization process")
+
+        self.pb_save_state = QtWidgets.QPushButton("Save State", parent=self)
+        self.pb_save_state.setToolTip("Save paused analysis or organization progress to disk")
+        self.pb_save_state.setEnabled(False)
+        self.pb_save_state.clicked.connect(self.evt_save_state)
+
+        self.pb_resume = QtWidgets.QPushButton("Resume", parent=self)
+        self.pb_resume.setToolTip("Resume paused or previously saved analysis / organization")
+        self.pb_resume.setEnabled(False)
+        self.pb_resume.clicked.connect(self.evt_resume_operation)
+
+        # Insert Save State & Resume right after pb_stop (index 3 and 4, before the spacer)
+        self.horizontalLayout_buttons.insertWidget(3, self.pb_save_state)
+        self.horizontalLayout_buttons.insertWidget(4, self.pb_resume)
 
         # Connect UI controls
         self.pb_browse_source.clicked.connect(self.evt_browse_source)
@@ -85,14 +120,18 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         self.lbl_info.setText("<>")
         self.lbl_db_status.setText("Database: Not initialized")
         self.progressBar.setVisible(False)
-        self.pb_analyze.setEnabled(False)
-        self.pb_organize.setEnabled(False)
-        self.pb_stop.setEnabled(False)
 
         # Table configuration
         self.tbl_file_data.setSortingEnabled(True)
         self.tbl_file_data.horizontalHeader().setSectionsMovable(True)
         self.tbl_file_data.setModel(QStandardItemModel())
+
+        self._update_button_states(is_running=False)
+
+    @property
+    def status(self) -> OrganizerStatus:
+        """Current operational status of the organizer widget."""
+        return self._status
 
     @property
     def max_workers(self) -> int:
@@ -129,19 +168,42 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         """
         Set and configure a new source directory.
 
-        Automatically inspects directory for existing `.db/album.db`, adjusts default
-        destination and organization mode, enables action buttons, and resets table data.
+        Automatically inspects directory for existing `.db/album.db` and any saved
+        Memento state, adjusts default destination and organization mode, updates
+        action buttons, and resets table data.
 
         Args:
             new_path (str): Target directory path.
         """
+        self._current_plan = []
+        self._plan_context = None
+        self._status = OrganizerStatus.IDLE
+        self._paused_phase = ""
+        self._total_discovered_files = 0
+        self._accumulated_stats = OrganizeStats()
+        self.tbl_file_data.setModel(QStandardItemModel())
+
         if new_path and os.path.isdir(new_path):
             norm_path = os.path.normpath(new_path)
             self._selected_path = norm_path
             self.lbl_folder_selected.setText(norm_path)
             self._detect_and_configure_target(norm_path)
-            self.pb_analyze.setEnabled(True)
-            self.pb_organize.setEnabled(True)
+
+            if self._save_manager.has_save(norm_path):
+                memento = self._save_manager.load_memento(norm_path)
+                if memento:
+                    if memento.phase == "organize":
+                        self.lbl_info.setText(
+                            f"Saved organization state found ({memento.organized_count}/{memento.files_count} files done). "
+                            f"Click 'Resume' to continue from checkpoint."
+                        )
+                    else:
+                        self.lbl_info.setText(
+                            f"Saved analysis state found ({memento.analyzed_count}/{memento.files_count} files analyzed). "
+                            f"Click 'Resume' to continue from checkpoint."
+                        )
+            else:
+                self.lbl_info.setText("<>")
         else:
             self._selected_path = ""
             self._target_path = ""
@@ -149,12 +211,8 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             self.lbl_target_selected.setText("<>")
             self.lbl_info.setText("<>")
             self.lbl_db_status.setText("Database: Not initialized")
-            self.pb_analyze.setEnabled(False)
-            self.pb_organize.setEnabled(False)
 
-        self._current_plan = []
-        self._plan_context = None
-        self.tbl_file_data.setModel(QStandardItemModel())
+        self._update_button_states(is_running=False)
 
     @property
     def target_path(self) -> str:
@@ -189,7 +247,6 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         """
         has_db = OrganizerDatabase.has_database(source_path)
         if has_db:
-            # Self-organization mode detected!
             self.rb_mode_self.setChecked(True)
             self.target_path = source_path
             self.lbl_db_status.setText("Database: Found (.db/album.db) - Self-organization active")
@@ -198,7 +255,6 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             self.rb_action_move.setChecked(True)
             self.lbl_action_hint.setText("Self-organization reorganizes files in-place (Move only)")
         else:
-            # New organization mode
             self.rb_mode_new.setChecked(True)
             default_target = FileOrganizerEngine.get_default_target_dir(source_path)
             self.target_path = default_target
@@ -270,18 +326,120 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         """
         return "self_organization" if self.rb_mode_self.isChecked() else "new_organization"
 
+    def create_memento(self) -> OrganizerMemento:
+        """
+        Freeze the current paused/in-progress organizer state into an OrganizerMemento.
+
+        Returns:
+            OrganizerMemento: Snapshot containing plan items, phase, mode, action, and stats.
+        """
+        plan_map: Dict[str, dict] = {
+            os.path.normpath(item.file_path): item.to_dict()
+            for item in self._current_plan
+        }
+        phase = self._paused_phase or "analyze"
+        total_files = max(self._total_discovered_files, len(self._current_plan))
+        return OrganizerMemento(
+            source_dir=self._selected_path,
+            target_dir=self._target_path,
+            mode=self.get_mode(),
+            action_type=self.get_action_type(),
+            phase=phase,
+            files_count=total_files,
+            plan_items=plan_map,
+            stats=self._accumulated_stats.to_dict(),
+        )
+
+    def restore_memento(self, memento: OrganizerMemento) -> None:
+        """
+        Restore widget state, UI mode/action selectors, plan items, and stats from a memento.
+
+        Args:
+            memento (OrganizerMemento): Loaded memento snapshot.
+        """
+        self._selected_path = os.path.normpath(memento.source_dir)
+        self.lbl_folder_selected.setText(self._selected_path)
+
+        if memento.mode == "self_organization":
+            self.rb_mode_self.setChecked(True)
+        else:
+            self.rb_mode_new.setChecked(True)
+
+        self.target_path = memento.target_dir
+
+        if memento.action_type == "move":
+            self.rb_action_move.setChecked(True)
+        else:
+            self.rb_action_copy.setChecked(True)
+
+        self._current_plan = [
+            OrganizePlanItem.from_dict(item_dict)
+            for item_dict in memento.plan_items.values()
+        ]
+        self._plan_context = (self._selected_path, self._target_path, memento.mode)
+        self._paused_phase = memento.phase
+        self._total_discovered_files = max(memento.files_count, len(self._current_plan))
+        self._accumulated_stats = OrganizeStats.from_dict(memento.stats)
+        self._status = OrganizerStatus.PAUSED
+
+        self._populate_plan_table(self._current_plan)
+        self._update_button_states(is_running=False)
+
+    def _prompt_saved_state_if_exists(self) -> Optional[str]:
+        """
+        Check whether a saved Memento exists for the current directory and prompt the user.
+
+        Returns:
+            Optional[str]: 'resume' to resume saved state, 'fresh' to start fresh (after deleting save),
+                'cancel' to abort, or None if no saved state exists.
+        """
+        if not self._selected_path or not self._save_manager.has_save(self._selected_path):
+            return None
+
+        reply = QMessageBox.question(
+            self,
+            "Saved Organizer State Detected",
+            "A saved organizer checkpoint exists for this directory.\n\n"
+            "Would you like to resume from the saved checkpoint?\n"
+            "Choose 'Yes' to resume, 'No' to start fresh, or 'Cancel'.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            return "resume"
+        if reply == QMessageBox.StandardButton.Cancel:
+            return "cancel"
+        self._save_manager.delete_save(self._selected_path)
+        return "fresh"
+
     def evt_analyze_selected(self) -> None:
         """
-        Initiate background scanning and preview plan generation for the selected folder.
+        Initiate background parallel scanning and preview plan generation for the selected folder.
 
-        Spawns an OrganizerWorker with operation='analyze' and binds progress/result signals.
+        Prompts to resume if a saved checkpoint exists for the selected directory.
         """
         if not self._selected_path or not os.path.isdir(self._selected_path):
             self.__show_warning("Please select a valid source directory first.")
             return
 
-        self._set_running_state(True)
-        self.lbl_info.setText("Analyzing files in directory...")
+        choice = self._prompt_saved_state_if_exists()
+        if choice == "resume":
+            self.evt_resume_operation()
+            return
+        if choice == "cancel":
+            return
+
+        self._paused_phase = ""
+        self._accumulated_stats = OrganizeStats()
+        self._start_analyze_worker(existing_items=None)
+
+    def _start_analyze_worker(self, existing_items: Optional[Dict[str, OrganizePlanItem]]) -> None:
+        """Launch OrganizerWorker in 'analyze' mode, optionally resuming from `existing_items`."""
+        self._status = OrganizerStatus.RUNNING
+        self._update_button_states(is_running=True)
+        self.lbl_info.setText(
+            "Resuming analysis from checkpoint..." if existing_items else "Analyzing files in directory..."
+        )
         self.progressBar.setValue(0)
         self.progressBar.setVisible(True)
 
@@ -295,13 +453,15 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             action_type=action,
             operation="analyze",
             max_workers=self._max_workers,
-            parent=self
+            existing_items=existing_items,
+            parent=self,
         )
+        self._worker.analysis_started.connect(self._on_status_message)
         self._worker.progress_updated.connect(self._on_progress_updated)
         self._worker.plan_ready.connect(self._on_plan_ready)
+        self._worker.paused.connect(self._on_worker_paused)
         self._worker.status_message.connect(self._on_status_message)
         self._worker.error_occurred.connect(self._on_worker_error)
-        self._worker.finished.connect(lambda _: self._set_running_state(False))
         self._worker.start()
 
     def _on_plan_ready(self, plan: List[OrganizePlanItem]) -> None:
@@ -312,13 +472,23 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             plan (List[OrganizePlanItem]): List of planned media items with detected dates and targets.
         """
         self._current_plan = plan
+        self._total_discovered_files = len(plan)
         self._plan_context = (self._selected_path, self._target_path, self.get_mode())
+        self._status = OrganizerStatus.COMPLETED
+        self._paused_phase = ""
+
+        # Clean up any analyze-phase save file now that full plan is complete
+        if self._selected_path and self._save_manager.has_save(self._selected_path):
+            saved = self._save_manager.load_memento(self._selected_path)
+            if saved and saved.phase == "analyze":
+                self._save_manager.delete_save(self._selected_path)
+
         self._populate_plan_table(plan)
         msg = f"Analysis complete: {len(plan)} files discovered and planned ({self._max_workers} threads)."
         self.lbl_info.setText(msg)
         self.ItemSelected.emit(msg)
         self.LogEventEmitted.emit(msg)
-        self._set_running_state(False)
+        self._update_button_states(is_running=False)
 
     def _populate_plan_table(self, plan: List[OrganizePlanItem]) -> None:
         """
@@ -409,7 +579,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         """
         current_ctx = (self._selected_path, self._target_path, mode)
         if self._current_plan and self._plan_context == current_ctx:
-            if any(item.status == "pending" for item in self._current_plan):
+            if any(item.status not in ("organized", "skipped") for item in self._current_plan):
                 return self._current_plan
         return None
 
@@ -417,23 +587,42 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         """
         Validate preconditions and trigger parallel background organization execution.
 
-        Reuses an already-analyzed preview plan when available (avoiding duplicate scanning).
-        Checks available disk capacity before copying. If disk space is insufficient,
-        prompts the user with an interactive dialog offering to switch to Move action.
+        Prompts to resume if a saved checkpoint exists. Reuses an already-analyzed
+        preview plan when available, and checks available disk capacity before copying.
         """
         if not self._selected_path or not os.path.isdir(self._selected_path):
             self.__show_warning("Please select a valid source directory first.")
             return
 
+        choice = self._prompt_saved_state_if_exists()
+        if choice == "resume":
+            self.evt_resume_operation()
+            return
+        if choice == "cancel":
+            return
+
+        mode = self.get_mode()
+        reusable_plan = self._get_reusable_plan(mode)
+        self._start_organize_worker(existing_plan=reusable_plan, initial_stats=None)
+
+    def _start_organize_worker(
+        self,
+        existing_plan: Optional[List[OrganizePlanItem]],
+        initial_stats: Optional[OrganizeStats],
+    ) -> None:
+        """Validate disk space (for Copy) and launch OrganizerWorker in 'organize' mode."""
         mode = self.get_mode()
         action = self.get_action_type()
-        reusable_plan = self._get_reusable_plan(mode)
 
         # Check disk space if copying
         if action == "copy" and mode == "new_organization":
-            total_size = sum(item.file_size for item in reusable_plan) if reusable_plan else 0
-            if total_size > 0:
-                has_space, req, free = check_disk_space(self._target_path, total_size)
+            pending_bytes = (
+                sum(item.file_size for item in existing_plan if item.status not in ("organized", "skipped"))
+                if existing_plan
+                else 0
+            )
+            if pending_bytes > 0:
+                has_space, req, free = check_disk_space(self._target_path, pending_bytes)
                 if not has_space:
                     req_mb = round(req / (1024 * 1024), 1)
                     free_mb = round(free / (1024 * 1024), 1)
@@ -453,8 +642,8 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
                     else:
                         return
 
-        # Start organization worker
-        self._set_running_state(True)
+        self._status = OrganizerStatus.RUNNING
+        self._update_button_states(is_running=True)
         self.progressBar.setValue(0)
         self.progressBar.setVisible(True)
 
@@ -465,24 +654,148 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             action_type=action,
             operation="organize",
             max_workers=self._max_workers,
-            existing_plan=reusable_plan,
-            parent=self
+            existing_plan=existing_plan,
+            initial_stats=initial_stats,
+            parent=self,
         )
         self._worker.analysis_started.connect(self._on_status_message)
         self._worker.progress_updated.connect(self._on_progress_updated)
         self._worker.status_message.connect(self._on_status_message)
         self._worker.log_event.connect(self._on_log_event)
         self._worker.space_error.connect(self._on_space_error)
+        self._worker.paused.connect(self._on_worker_paused)
         self._worker.finished.connect(self._on_organize_finished)
         self._worker.error_occurred.connect(self._on_worker_error)
         self._worker.start()
 
     def evt_stop_operation(self) -> None:
-        """Cooperatively stop any running background worker thread."""
+        """Cooperatively pause any running background worker thread, preserving progress."""
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
-            self.lbl_info.setText("Stopping operation...")
+            self.lbl_info.setText("Pausing operation...")
             self.pb_stop.setEnabled(False)
+
+    def _on_worker_paused(
+        self,
+        phase: str,
+        plan: List[OrganizePlanItem],
+        stats: OrganizeStats,
+        total_files: int,
+    ) -> None:
+        """
+        Handle cooperative pause emitted by OrganizerWorker.
+
+        Freezes partial plan and stats in memory, updates the preview table, and
+        enables 'Save State' and 'Resume' controls.
+
+        Args:
+            phase (str): Interrupted phase ('analyze' or 'organize').
+            plan (List[OrganizePlanItem]): Plan items collected/updated up to the pause point.
+            stats (OrganizeStats): Partial execution statistics accumulated so far.
+            total_files (int): Total candidate files discovered in the source directory.
+        """
+        self._status = OrganizerStatus.PAUSED
+        self._paused_phase = phase
+        self._current_plan = plan
+        self._plan_context = (self._selected_path, self._target_path, self.get_mode())
+        self._accumulated_stats = stats
+        self._total_discovered_files = max(total_files, len(plan))
+
+        self._populate_plan_table(plan)
+
+        if phase == "organize":
+            done_count = sum(1 for item in plan if item.status in ("organized", "skipped"))
+            msg = (
+                f"Organization paused ({done_count}/{self._total_discovered_files} files done). "
+                f"Click 'Save State' to persist checkpoint or 'Resume' to continue."
+            )
+        else:
+            msg = (
+                f"Analysis paused ({len(plan)}/{self._total_discovered_files} files analyzed). "
+                f"Click 'Save State' to persist checkpoint or 'Resume' to continue."
+            )
+
+        self.lbl_info.setText(msg)
+        self.ItemSelected.emit(msg)
+        self.LogEventEmitted.emit(msg)
+        self._update_button_states(is_running=False)
+
+    def evt_save_state(self) -> None:
+        """Save the current paused analysis or organization state via OrganizerSaveManager."""
+        if not self._selected_path or self._status != OrganizerStatus.PAUSED:
+            self.__show_warning("No paused operation to save state for.")
+            return
+        try:
+            memento = self.create_memento()
+            saved_path = self._save_manager.save_memento(memento)
+            msg = f"Organizer state ({memento.phase}) successfully saved to '{saved_path}'."
+            self.lbl_info.setText(msg)
+            self.ItemSelected.emit(msg)
+            self.LogEventEmitted.emit(msg)
+            self._update_button_states(is_running=False)
+        except Exception as err:
+            err_msg = f"Error saving organizer state: {err}"
+            self.__show_warning(err_msg)
+            self.LogEventEmitted.emit(err_msg)
+
+    def evt_resume_operation(self) -> None:
+        """
+        Resume a paused or saved analysis / organization operation from its exact checkpoint.
+
+        If a saved file exists on disk and the widget is not currently holding an in-memory
+        paused state, loads the memento and validates location integrity via `verify_location()`.
+        """
+        if not self._selected_path or not os.path.isdir(self._selected_path):
+            self.__show_warning("Please select a valid source directory first.")
+            return
+
+        # Load from disk if not already paused in memory
+        if self._status != OrganizerStatus.PAUSED:
+            if not self._save_manager.has_save(self._selected_path):
+                self.__show_warning("No saved organizer state found for the current directory.")
+                return
+
+            memento = self._save_manager.load_memento(self._selected_path)
+            if not memento:
+                self.__show_warning("Failed to load saved organizer state.")
+                return
+
+            is_valid, reason = self._save_manager.verify_location(memento)
+            if not is_valid:
+                reply = QMessageBox.warning(
+                    self,
+                    "Location Verification Failed",
+                    f"The saved organizer state cannot be verified:\n\n{reason}\n\n"
+                    "Would you like to delete the invalid save and start fresh?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._save_manager.delete_save(self._selected_path)
+                    self._update_button_states(is_running=False)
+                return
+
+            self.restore_memento(memento)
+
+        phase = self._paused_phase or "analyze"
+        if phase == "organize":
+            done_count = sum(1 for item in self._current_plan if item.status in ("organized", "skipped"))
+            msg = f"Resuming organization from checkpoint ({done_count}/{len(self._current_plan)} files done)..."
+            self.lbl_info.setText(msg)
+            self.LogEventEmitted.emit(msg)
+            self._start_organize_worker(
+                existing_plan=self._current_plan,
+                initial_stats=self._accumulated_stats,
+            )
+        else:
+            existing_map = {
+                os.path.normpath(item.file_path): item
+                for item in self._current_plan
+            }
+            msg = f"Resuming analysis from checkpoint ({len(existing_map)}/{self._total_discovered_files} files analyzed)..."
+            self.lbl_info.setText(msg)
+            self.LogEventEmitted.emit(msg)
+            self._start_analyze_worker(existing_items=existing_map)
 
     def _on_progress_updated(self, current: int, total: int) -> None:
         """
@@ -525,7 +838,8 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             required (int): Bytes required for the operation.
             free (int): Free bytes currently available.
         """
-        self._set_running_state(False)
+        self._status = OrganizerStatus.IDLE
+        self._update_button_states(is_running=False)
         req_mb = round(required / (1024 * 1024), 1)
         free_mb = round(free / (1024 * 1024), 1)
         reply = QMessageBox.question(
@@ -545,16 +859,24 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         """
         Handle successful completion of an organization run.
 
-        Displays summary dialog, updates database status indicator, and re-enables controls.
+        Deletes any saved checkpoint, displays summary dialog, updates database
+        status indicator, and re-enables controls.
 
         Args:
             stats (OrganizeStats): Metrics and counters from the completed run.
         """
-        self._set_running_state(False)
+        self._status = OrganizerStatus.COMPLETED
+        self._paused_phase = ""
         self._plan_context = None
+        self._accumulated_stats = stats
+
+        # Clean up saved Memento file after successful completion
+        if self._selected_path:
+            self._save_manager.delete_save(self._selected_path)
+
+        self._update_button_states(is_running=False)
         self.progressBar.setValue(100)
 
-        # Generate summary report
         summary = (
             f"Organization complete! Processed: {stats.total_processed}, "
             f"Organized: {stats.moved + stats.copied} (Moved: {stats.moved}, Copied: {stats.copied}), "
@@ -564,14 +886,12 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         self.ItemSelected.emit(summary)
         self.LogEventEmitted.emit(summary)
 
-        # Detailed summary dialog
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Organization Finished")
         msg_box.setText(summary)
         msg_box.setIcon(QMessageBox.Icon.Information)
         msg_box.exec()
 
-        # Update database status label
         self._detect_and_configure_target(self._target_path)
 
     def _on_worker_error(self, err_msg: str) -> None:
@@ -581,24 +901,36 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         Args:
             err_msg (str): Error message string.
         """
-        self._set_running_state(False)
+        self._status = OrganizerStatus.IDLE
+        self._update_button_states(is_running=False)
         self.__show_warning(f"Error during organization: {err_msg}")
         self.LogEventEmitted.emit(f"Error: {err_msg}")
 
-    def _set_running_state(self, running: bool) -> None:
+    def _update_button_states(self, is_running: bool = False) -> None:
         """
-        Toggle UI widget enabled/disabled states based on active execution.
+        Toggle UI widget enabled/disabled states based on active status and saved state.
 
         Args:
-            running (bool): True if background task is active, False otherwise.
+            is_running (bool): True if background task is currently active, False otherwise.
         """
-        self.pb_analyze.setEnabled(not running)
-        self.pb_organize.setEnabled(not running)
-        self.pb_stop.setEnabled(running)
-        self.pb_browse_source.setEnabled(not running)
-        self.pb_browse_target.setEnabled(not running and not self.rb_mode_self.isChecked())
-        self.gb_mode.setEnabled(not running)
-        self.gb_action.setEnabled(not running and not self.rb_mode_self.isChecked())
+        has_path = bool(self._selected_path and os.path.isdir(self._selected_path))
+        has_save = has_path and self._save_manager.has_save(self._selected_path)
+        active = is_running or self._status == OrganizerStatus.RUNNING
+        is_paused = (not active) and (self._status == OrganizerStatus.PAUSED)
+
+        if hasattr(self._parent, "dir_viewer") and self._parent.dir_viewer:
+            self._parent.dir_viewer.setEnabled(not active)
+
+        self.pb_analyze.setEnabled(has_path and not active)
+        self.pb_organize.setEnabled(has_path and not active)
+        self.pb_stop.setEnabled(active)
+        self.pb_save_state.setEnabled(has_path and is_paused)
+        self.pb_resume.setEnabled(has_path and not active and (is_paused or has_save))
+
+        self.pb_browse_source.setEnabled(not active)
+        self.pb_browse_target.setEnabled(not active and not self.rb_mode_self.isChecked())
+        self.gb_mode.setEnabled(not active)
+        self.gb_action.setEnabled(not active and not self.rb_mode_self.isChecked())
 
     def __show_warning(self, message: str) -> None:
         """

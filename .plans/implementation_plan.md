@@ -49,10 +49,11 @@ We have introduced a feature to organize family photos and videos into a structu
 - [x] Reuse existing preview plan (`existing_plan`) when starting organization from UI and optimize large table rendering / progress updates in `FileOrganizer`.
 - [x] Add 4 unit tests for multithreaded execution, collision stress testing, plan reuse, and MoviePy bypass in `test_file_organizer_engine.py` (54 passed).
 
-### Step 4: Memento Pattern for File Organizer (Pause / Save State / Resume) — `[NEXT]`
-- [ ] Create `src/family_album_lib/organizer_memento.py` (`OrganizerStatus`, `OrganizerMemento`, `OrganizerSaveManager`) supporting both `analyze` and `organize` phases.
-- [ ] Add `Save State` and `Resume` buttons to `FileOrganizer` widget and support pausing/resuming from the exact stopping point.
-- [ ] Add unit tests in `tests/test_organizer_memento.py` and `test_file_organizer_widget.py`.
+### Step 4: Memento Pattern for File Organizer (Pause / Save State / Resume) — `[COMPLETED]`
+- [x] Create `src/family_album_lib/organizer_memento.py` (`OrganizerStatus`, `OrganizerMemento`, `OrganizerSaveManager`) supporting both `analyze` and `organize` phases with `verify_location()`.
+- [x] Add `to_dict()` / `from_dict()` serialization to `MediaDateResult`, `OrganizePlanItem`, and `OrganizeStats`; add resumable `existing_items`, `initial_stats`, and `paused` signal to `FileOrganizerEngine` / `OrganizerWorker`.
+- [x] Add `Save State` and `Resume` buttons to `FileOrganizer` widget and support pausing/saving/resuming from the exact checkpoint for both analysis and organization.
+- [x] Add 5 unit tests in `tests/test_organizer_memento.py` (59 passed total).
 
 ---
 

@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from PIL import Image
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -105,6 +105,41 @@ class OrganizePlanItem:
     action_type: str = "copy"  # "copy" or "move"
     status: str = "pending"  # "pending", "organized", "skipped", "error"
 
+    def to_dict(self) -> dict:
+        """Serialize OrganizePlanItem to a JSON-compatible dictionary."""
+        return {
+            "file_path": os.path.normpath(self.file_path),
+            "file_name": self.file_name,
+            "file_size": self.file_size,
+            "date_result": self.date_result.to_dict(),
+            "destination_dir": os.path.normpath(self.destination_dir),
+            "target_path": os.path.normpath(self.target_path),
+            "is_video": self.is_video,
+            "is_image": self.is_image,
+            "resolution": self.resolution,
+            "maker": self.maker,
+            "action_type": self.action_type,
+            "status": self.status,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "OrganizePlanItem":
+        """Reconstruct an OrganizePlanItem from a dictionary."""
+        return cls(
+            file_path=os.path.normpath(data["file_path"]),
+            file_name=data["file_name"],
+            file_size=int(data.get("file_size", 0)),
+            date_result=MediaDateResult.from_dict(data.get("date_result", {})),
+            destination_dir=os.path.normpath(data["destination_dir"]),
+            target_path=os.path.normpath(data["target_path"]),
+            is_video=bool(data.get("is_video", False)),
+            is_image=bool(data.get("is_image", False)),
+            resolution=str(data.get("resolution", "")),
+            maker=str(data.get("maker", "")),
+            action_type=str(data.get("action_type", "copy")),
+            status=str(data.get("status", "pending")),
+        )
+
 
 @dataclass
 class OrganizeStats:
@@ -129,6 +164,35 @@ class OrganizeStats:
     errors: int = 0
     total_bytes: int = 0
     details: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Serialize OrganizeStats into a JSON-compatible dictionary."""
+        return {
+            "total_scanned": self.total_scanned,
+            "total_processed": self.total_processed,
+            "moved": self.moved,
+            "copied": self.copied,
+            "skipped": self.skipped,
+            "errors": self.errors,
+            "total_bytes": self.total_bytes,
+            "details": list(self.details),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[dict]) -> "OrganizeStats":
+        """Reconstruct OrganizeStats from a dictionary."""
+        if not data:
+            return cls()
+        return cls(
+            total_scanned=int(data.get("total_scanned", 0)),
+            total_processed=int(data.get("total_processed", 0)),
+            moved=int(data.get("moved", 0)),
+            copied=int(data.get("copied", 0)),
+            skipped=int(data.get("skipped", 0)),
+            errors=int(data.get("errors", 0)),
+            total_bytes=int(data.get("total_bytes", 0)),
+            details=list(data.get("details", [])),
+        )
 
 
 def calculate_file_hash(file_path: str, chunk_size: int = 131072) -> str:
@@ -505,16 +569,16 @@ class FileOrganizerEngine:
         prefer_filename: bool = True,
         cancel_event: Optional[threading.Event] = None,
         progress_cb: Optional[Callable[[int, int], None]] = None,
-        max_workers: int = 0
+        max_workers: int = 0,
+        existing_items: Optional[Dict[str, OrganizePlanItem]] = None,
+        total_files_out: Optional[List[int]] = None,
     ) -> List[OrganizePlanItem]:
         """
         Scan source directory in parallel using `ThreadPoolExecutor` and construct
         an actionable organization plan.
 
-        Inspects each candidate file concurrently to extract creation/taken date
-        (prioritizing filename), determines destination subfolder (`YYYY/MM` or `No_Date`),
-        and probes file metadata in a single pass. In self-organization mode, skips
-        already structured subdirectories matching `YYYY/MM` or `No_Date`.
+        Supports Memento resumption via `existing_items`: files whose normalized path is
+        already present in `existing_items` are reused immediately without disk I/O.
 
         Args:
             source_dir (str): Root folder to scan.
@@ -525,6 +589,10 @@ class FileOrganizerEngine:
             cancel_event (Optional[threading.Event]): Cooperative cancellation event flag.
             progress_cb (Optional[Callable[[int, int], None]]): Callback reporting (current, total).
             max_workers (int): Number of parallel worker threads (defaults to AppSettings.worker_threads).
+            existing_items (Optional[Dict[str, OrganizePlanItem]]): Previously analyzed items keyed by
+                normalized file path (used when resuming an interrupted analysis).
+            total_files_out (Optional[List[int]]): Optional single-element sink list updated with
+                total candidate files discovered in `source_dir`.
 
         Returns:
             List[OrganizePlanItem]: Array of prepared items scheduled for organization.
@@ -536,11 +604,16 @@ class FileOrganizerEngine:
         source_abs = os.path.abspath(source_dir)
         target_abs = os.path.abspath(target_dir)
 
+        norm_existing: Dict[str, OrganizePlanItem] = {}
+        if existing_items:
+            for k, v in existing_items.items():
+                norm_existing[os.path.normcase(os.path.normpath(os.path.abspath(k)))] = v
+
         # First pass: collect all candidate files
         all_candidate_files: List[str] = []
         for dirpath, dirnames, filenames in os.walk(source_abs):
             if cancel_event and cancel_event.is_set():
-                return plan
+                return list(existing_items.values()) if existing_items else plan
 
             # Skip .db and .git directories
             dirnames[:] = [d for d in dirnames if d != OrganizerDatabase.DB_FOLDER_NAME and d != ".git"]
@@ -559,52 +632,72 @@ class FileOrganizerEngine:
                 all_candidate_files.append(full_path)
 
         total_files = len(all_candidate_files)
+        if total_files_out is not None:
+            total_files_out.clear()
+            total_files_out.append(total_files)
+
         if total_files == 0:
             return plan
 
-        workers = max_workers if max_workers > 0 else AppSettings.instance().worker_threads
-        workers = max(1, min(workers, total_files))
-
-        completed = 0
-        last_report_time = 0.0
         results_by_idx: dict[int, OrganizePlanItem] = {}
+        to_inspect: List[Tuple[int, str]] = []
 
-        def _worker_task(index: int, path: str) -> Tuple[int, Optional[OrganizePlanItem]]:
-            if cancel_event and cancel_event.is_set():
-                return index, None
-            item = FileOrganizerEngine._inspect_single_file(
-                full_path=path,
-                target_abs=target_abs,
-                action_type=action_type,
-                prefer_filename=prefer_filename,
-            )
-            return index, item
+        for idx, fpath in enumerate(all_candidate_files):
+            norm_key = os.path.normcase(os.path.normpath(os.path.abspath(fpath)))
+            if norm_key in norm_existing:
+                cached = norm_existing[norm_key]
+                cached.action_type = action_type
+                results_by_idx[idx] = cached
+            else:
+                to_inspect.append((idx, fpath))
 
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [
-                executor.submit(_worker_task, idx, fpath)
-                for idx, fpath in enumerate(all_candidate_files)
-            ]
+        completed = len(results_by_idx)
+        last_report_time = 0.0
 
-            for future in as_completed(futures):
+        if progress_cb and completed > 0:
+            progress_cb(completed, total_files)
+            last_report_time = time.monotonic()
+
+        if to_inspect:
+            workers = max_workers if max_workers > 0 else AppSettings.instance().worker_threads
+            workers = max(1, min(workers, len(to_inspect)))
+
+            def _worker_task(index: int, path: str) -> Tuple[int, Optional[OrganizePlanItem]]:
                 if cancel_event and cancel_event.is_set():
-                    for f in futures:
-                        f.cancel()
-                    break
+                    return index, None
+                item = FileOrganizerEngine._inspect_single_file(
+                    full_path=path,
+                    target_abs=target_abs,
+                    action_type=action_type,
+                    prefer_filename=prefer_filename,
+                )
+                return index, item
 
-                try:
-                    idx, item = future.result()
-                    if item is not None:
-                        results_by_idx[idx] = item
-                except Exception:
-                    pass
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [
+                    executor.submit(_worker_task, idx, fpath)
+                    for idx, fpath in to_inspect
+                ]
 
-                completed += 1
-                if progress_cb:
-                    now = time.monotonic()
-                    if completed == total_files or (now - last_report_time) >= 0.05:
-                        progress_cb(completed, total_files)
-                        last_report_time = now
+                for future in as_completed(futures):
+                    if cancel_event and cancel_event.is_set():
+                        for f in futures:
+                            f.cancel()
+                        break
+
+                    try:
+                        idx, item = future.result()
+                        if item is not None:
+                            results_by_idx[idx] = item
+                    except Exception:
+                        pass
+
+                    completed += 1
+                    if progress_cb:
+                        now = time.monotonic()
+                        if completed == total_files or (now - last_report_time) >= 0.05:
+                            progress_cb(completed, total_files)
+                            last_report_time = now
 
         # Preserve deterministic ordering matching directory traversal
         plan = [results_by_idx[i] for i in sorted(results_by_idx.keys())]
@@ -620,22 +713,15 @@ class FileOrganizerEngine:
         progress_cb: Optional[Callable[[int, int], None]] = None,
         status_cb: Optional[Callable[[str], None]] = None,
         log_cb: Optional[Callable[[str], None]] = None,
-        max_workers: int = 0
+        max_workers: int = 0,
+        initial_stats: Optional[OrganizeStats] = None,
     ) -> OrganizeStats:
         """
         Execute the organization plan in parallel using `ThreadPoolExecutor` and
         record transactions into the thread-safe SQLite database.
 
-        Preconditions:
-        - If action_type is 'copy', verifies free disk capacity before starting.
-
-        Parallel execution:
-        - Pre-creates unique destination subdirectories before spawning workers.
-        - Worker threads concurrently compute Blake2b hashes and perform `shutil.copy2`
-          or `shutil.move`, synchronizing only on atomic collision filename reservation
-          (`_copyN`) and SQLite catalog writes.
-        - Throttles progress/status callbacks to keep GUI responsive on large archives.
-        - Closes and commits the session in `<target_dir>/.db/album.db`.
+        Supports Memento resumption: skips items whose status is already 'organized'
+        or 'skipped' and continues accumulating metrics from `initial_stats` if provided.
 
         Args:
             plan (List[OrganizePlanItem]): List of items to process.
@@ -647,15 +733,28 @@ class FileOrganizerEngine:
             status_cb (Optional[Callable[[str], None]]): Callback for high-level status messages.
             log_cb (Optional[Callable[[str], None]]): Callback for detailed log output.
             max_workers (int): Number of parallel worker threads (defaults to AppSettings.worker_threads).
+            initial_stats (Optional[OrganizeStats]): Previously accumulated stats when resuming a paused run.
 
         Returns:
-            OrganizeStats: Summary statistics of the completed run.
+            OrganizeStats: Summary statistics of the completed or paused run.
 
         Raises:
             InsufficientDiskSpaceError: When copying and available disk space is less than required.
         """
-        stats = OrganizeStats()
-        stats.total_scanned = len(plan)
+        if initial_stats is not None:
+            stats = OrganizeStats(
+                total_scanned=max(len(plan), initial_stats.total_scanned),
+                total_processed=initial_stats.total_processed,
+                moved=initial_stats.moved,
+                copied=initial_stats.copied,
+                skipped=initial_stats.skipped,
+                errors=initial_stats.errors,
+                total_bytes=initial_stats.total_bytes,
+                details=list(initial_stats.details),
+            )
+        else:
+            stats = OrganizeStats()
+            stats.total_scanned = len(plan)
         target_abs = os.path.abspath(target_dir)
 
         pending_items = [item for item in plan if item.status not in ("organized", "skipped")]
@@ -852,6 +951,7 @@ class OrganizerWorker(QThread):
     space_error = pyqtSignal(int, int)  # required_bytes, free_bytes
     finished = pyqtSignal(object)  # OrganizeStats
     plan_ready = pyqtSignal(list)  # List[OrganizePlanItem]
+    paused = pyqtSignal(str, list, object, int)  # phase, plan, stats, total_files
     error_occurred = pyqtSignal(str)
 
     def __init__(
@@ -863,6 +963,8 @@ class OrganizerWorker(QThread):
         operation: str = "organize",  # "analyze" or "organize"
         max_workers: int = 0,
         existing_plan: Optional[List[OrganizePlanItem]] = None,
+        existing_items: Optional[Dict[str, OrganizePlanItem]] = None,
+        initial_stats: Optional[OrganizeStats] = None,
         parent=None
     ):
         """
@@ -877,6 +979,10 @@ class OrganizerWorker(QThread):
             max_workers (int): Number of parallel worker threads (defaults to AppSettings.worker_threads).
             existing_plan (Optional[List[OrganizePlanItem]]): Pre-analyzed plan to reuse during
                 'organize' operation without scanning the directory a second time.
+            existing_items (Optional[Dict[str, OrganizePlanItem]]): Previously analyzed items keyed by
+                normalized file path when resuming an interrupted 'analyze' operation.
+            initial_stats (Optional[OrganizeStats]): Previously accumulated stats when resuming
+                an interrupted 'organize' operation.
             parent (Optional[QObject]): Parent Qt object.
         """
         super().__init__(parent)
@@ -887,22 +993,25 @@ class OrganizerWorker(QThread):
         self.operation = operation
         self.max_workers = max_workers if max_workers > 0 else AppSettings.instance().worker_threads
         self.existing_plan = existing_plan
+        self.existing_items = existing_items
+        self.initial_stats = initial_stats
         self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
-        """Cooperatively request thread cancellation."""
+        """Cooperatively request thread cancellation (pause)."""
         self._cancel_event.set()
 
     def run(self) -> None:
         """
         Main execution loop in dedicated worker thread.
 
-        Executes parallel analysis or organization based on `self.operation`, reusing
-        `self.existing_plan` if supplied, and emitting corresponding Qt signals.
+        Executes parallel analysis or organization based on `self.operation`, supporting
+        resumption from Memento state and emitting `paused` when cancelled cooperatively.
         """
         try:
             if self.operation == "analyze":
                 self.analysis_started.emit(f"Scanning '{self.source_dir}' ({self.max_workers} threads)...")
+                total_sink: List[int] = []
                 plan = FileOrganizerEngine.scan_and_plan(
                     source_dir=self.source_dir,
                     target_dir=self.target_dir,
@@ -910,15 +1019,27 @@ class OrganizerWorker(QThread):
                     action_type=self.action_type,
                     cancel_event=self._cancel_event,
                     progress_cb=self.progress_updated.emit,
-                    max_workers=self.max_workers
+                    max_workers=self.max_workers,
+                    existing_items=self.existing_items,
+                    total_files_out=total_sink,
                 )
-                self.plan_ready.emit(plan)
-                self.status_message.emit(f"Scan complete. Found {len(plan)} files.")
+                total_discovered = total_sink[0] if total_sink else len(plan)
+                if self._cancel_event.is_set():
+                    partial_stats = OrganizeStats(total_scanned=total_discovered)
+                    self.paused.emit("analyze", plan, partial_stats, total_discovered)
+                    self.status_message.emit(
+                        f"Analysis paused ({len(plan)}/{total_discovered} files analyzed). You can save state or resume."
+                    )
+                else:
+                    self.plan_ready.emit(plan)
+                    self.status_message.emit(f"Scan complete. Found {len(plan)} files.")
             else:
                 self.analysis_started.emit(f"Organizing files to '{self.target_dir}' ({self.max_workers} threads)...")
-                # 1. Reuse existing preview plan if available, otherwise scan now
+                total_sink = []
+                # 1. Reuse existing preview/resumed plan if available, otherwise scan now
                 if self.existing_plan:
                     plan = self.existing_plan
+                    total_discovered = len(plan)
                     for item in plan:
                         item.action_type = self.action_type
                 else:
@@ -929,9 +1050,17 @@ class OrganizerWorker(QThread):
                         action_type=self.action_type,
                         cancel_event=self._cancel_event,
                         progress_cb=self.progress_updated.emit,
-                        max_workers=self.max_workers
+                        max_workers=self.max_workers,
+                        existing_items=self.existing_items,
+                        total_files_out=total_sink,
                     )
+                    total_discovered = total_sink[0] if total_sink else len(plan)
                     if self._cancel_event.is_set():
+                        partial_stats = OrganizeStats(total_scanned=total_discovered)
+                        self.paused.emit("analyze", plan, partial_stats, total_discovered)
+                        self.status_message.emit(
+                            f"Analysis paused ({len(plan)}/{total_discovered} files analyzed). You can save state or resume."
+                        )
                         return
 
                 # 2. Execute plan in parallel
@@ -944,9 +1073,17 @@ class OrganizerWorker(QThread):
                     progress_cb=self.progress_updated.emit,
                     status_cb=self.status_message.emit,
                     log_cb=self.log_event.emit,
-                    max_workers=self.max_workers
+                    max_workers=self.max_workers,
+                    initial_stats=self.initial_stats,
                 )
-                self.finished.emit(stats)
+                if self._cancel_event.is_set():
+                    self.paused.emit("organize", plan, stats, total_discovered)
+                    done_count = sum(1 for item in plan if item.status in ("organized", "skipped"))
+                    self.status_message.emit(
+                        f"Organization paused ({done_count}/{total_discovered} files done). You can save state or resume."
+                    )
+                else:
+                    self.finished.emit(stats)
 
         except InsufficientDiskSpaceError as space_err:
             self.space_error.emit(space_err.required_bytes, space_err.free_bytes)

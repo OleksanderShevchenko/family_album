@@ -66,6 +66,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         self._target_path: str = ""
         self._worker: Optional[OrganizerWorker] = None
         self._current_plan: List[OrganizePlanItem] = []
+        self._plan_context: Optional[tuple] = None  # (source_dir, target_dir, mode)
         self._max_workers: int = AppSettings.instance().worker_threads
 
         # Connect UI controls
@@ -152,6 +153,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             self.pb_organize.setEnabled(False)
 
         self._current_plan = []
+        self._plan_context = None
         self.tbl_file_data.setModel(QStandardItemModel())
 
     @property
@@ -310,8 +312,9 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             plan (List[OrganizePlanItem]): List of planned media items with detected dates and targets.
         """
         self._current_plan = plan
+        self._plan_context = (self._selected_path, self._target_path, self.get_mode())
         self._populate_plan_table(plan)
-        msg = f"Analysis complete: {len(plan)} files discovered and planned."
+        msg = f"Analysis complete: {len(plan)} files discovered and planned ({self._max_workers} threads)."
         self.lbl_info.setText(msg)
         self.ItemSelected.emit(msg)
         self.LogEventEmitted.emit(msg)
@@ -345,6 +348,14 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         model = QStandardItemModel(len(plan), len(headers))
         model.setHorizontalHeaderLabels(headers)
 
+        src_labels = {
+            "filename": "Filename (Name)",
+            "exif": "EXIF Metadata",
+            "video_metadata": "Video Metadata",
+            "filesystem": "File System",
+            "none": "None (No_Date)",
+        }
+
         for row_idx, item in enumerate(plan):
             item_name = QStandardItem(item.file_name)
             item_name.setToolTip(item.file_path)
@@ -352,17 +363,9 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             date_str = item.date_result.date.strftime("%Y-%m-%d %H:%M:%S") if item.date_result.date else "No Date"
             item_date = QStandardItem(date_str)
 
-            # Date source label
-            src_display = {
-                "filename": "Filename (Name)",
-                "exif": "EXIF Metadata",
-                "video_metadata": "Video Metadata",
-                "filesystem": "File System",
-                "none": "None (No_Date)"
-            }.get(item.date_result.source, item.date_result.source)
+            src_display = src_labels.get(item.date_result.source, item.date_result.source)
             item_source = QStandardItem(src_display)
 
-            # Target relative folder
             target_rel = os.path.relpath(item.destination_dir, self._target_path) if self._target_path else item.destination_dir
             item_target = QStandardItem(target_rel)
 
@@ -383,13 +386,38 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             model.setItem(row_idx, 5, item_type)
             model.setItem(row_idx, 6, item_res)
 
+        self.tbl_file_data.setSortingEnabled(False)
         self.tbl_file_data.setModel(model)
-        self.tbl_file_data.resizeColumnsToContents()
+        if len(plan) <= 500:
+            self.tbl_file_data.resizeColumnsToContents()
+        else:
+            default_widths = (240, 145, 130, 140, 90, 70, 100)
+            for col_idx, width in enumerate(default_widths):
+                self.tbl_file_data.setColumnWidth(col_idx, width)
+        self.tbl_file_data.setSortingEnabled(True)
+
+    def _get_reusable_plan(self, mode: str) -> Optional[List[OrganizePlanItem]]:
+        """
+        Return the cached preview plan if it matches the active source, target, and mode
+        and still contains pending items.
+
+        Args:
+            mode (str): Active organization mode.
+
+        Returns:
+            Optional[List[OrganizePlanItem]]: Reusable plan list, or None if a fresh scan is required.
+        """
+        current_ctx = (self._selected_path, self._target_path, mode)
+        if self._current_plan and self._plan_context == current_ctx:
+            if any(item.status == "pending" for item in self._current_plan):
+                return self._current_plan
+        return None
 
     def evt_organize_files(self) -> None:
         """
-        Validate preconditions and trigger background organization execution.
+        Validate preconditions and trigger parallel background organization execution.
 
+        Reuses an already-analyzed preview plan when available (avoiding duplicate scanning).
         Checks available disk capacity before copying. If disk space is insufficient,
         prompts the user with an interactive dialog offering to switch to Move action.
         """
@@ -399,11 +427,11 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
 
         mode = self.get_mode()
         action = self.get_action_type()
+        reusable_plan = self._get_reusable_plan(mode)
 
         # Check disk space if copying
         if action == "copy" and mode == "new_organization":
-            # Estimate size
-            total_size = sum(item.file_size for item in self._current_plan) if self._current_plan else 0
+            total_size = sum(item.file_size for item in reusable_plan) if reusable_plan else 0
             if total_size > 0:
                 has_space, req, free = check_disk_space(self._target_path, total_size)
                 if not has_space:
@@ -437,8 +465,10 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             action_type=action,
             operation="organize",
             max_workers=self._max_workers,
+            existing_plan=reusable_plan,
             parent=self
         )
+        self._worker.analysis_started.connect(self._on_status_message)
         self._worker.progress_updated.connect(self._on_progress_updated)
         self._worker.status_message.connect(self._on_status_message)
         self._worker.log_event.connect(self._on_log_event)
@@ -456,7 +486,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
 
     def _on_progress_updated(self, current: int, total: int) -> None:
         """
-        Update progress bar and parent window progress indicators.
+        Update the widget progress bar and status label without flooding logs.
 
         Args:
             current (int): Number of items processed so far.
@@ -464,8 +494,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
         """
         pct = int(current / total * 100) if total > 0 else 0
         self.progressBar.setValue(pct)
-        if hasattr(self._parent, 'evt_update_progress'):
-            self._parent.evt_update_progress(current, total)
+        self.lbl_info.setText(f"Processing {current:,} / {total:,} files ({pct}%)...")
 
     def _on_status_message(self, msg: str) -> None:
         """
@@ -479,14 +508,12 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
 
     def _on_log_event(self, msg: str) -> None:
         """
-        Relay log message to the log console and parent window.
+        Relay log message to the application log console via signal.
 
         Args:
             msg (str): Formatted log event message.
         """
         self.LogEventEmitted.emit(msg)
-        if hasattr(self._parent, 'log_event'):
-            self._parent.log_event(msg)
 
     def _on_space_error(self, required: int, free: int) -> None:
         """
@@ -524,6 +551,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             stats (OrganizeStats): Metrics and counters from the completed run.
         """
         self._set_running_state(False)
+        self._plan_context = None
         self.progressBar.setValue(100)
 
         # Generate summary report

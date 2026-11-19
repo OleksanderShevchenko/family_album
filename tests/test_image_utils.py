@@ -4,6 +4,8 @@ import unittest
 from datetime import datetime
 
 from src.family_album.utility_functions.image_utils import (
+    has_image_extension,
+    inspect_image_fast,
     is_image_file,
     get_image_size,
     get_image_creation_date,
@@ -72,4 +74,21 @@ class TestImageUtils(unittest.TestCase):
                 exif_ = get_image_exif(full_name)
                 expected_size = self._exif_size[file]
                 self.assertEqual(expected_size, len(exif_))
+
+    def test_inspect_image_fast(self):
+        """Single-pass Pillow inspection returns valid image flag, WxH resolution, and maker."""
+        for dir_name, _, files in os.walk(self._data_path):
+            for file in files:
+                full_name = os.path.join(dir_name, file)
+                self.assertTrue(has_image_extension(full_name))
+                is_img, resolution, maker = inspect_image_fast(full_name)
+                self.assertTrue(is_img)
+                exp_w, exp_h = self._image_sizes[file]
+                self.assertEqual(resolution, f"{exp_w}x{exp_h}")
+                self.assertIsInstance(maker, str)
+
+        is_img, resolution, maker = inspect_image_fast("nonexistent_file.jpg")
+        self.assertFalse(is_img)
+        self.assertEqual(resolution, "")
+        self.assertEqual(maker, "")
 

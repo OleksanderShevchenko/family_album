@@ -115,18 +115,20 @@ flowchart TD
 
 ---
 
-### Крок 4: Патерн Memento для Органайзера (Пауза / Збереження стану / Відновлення) — `[НАСТУПНИЙ КРОК]`
+### Крок 4: Патерн Memento для Органайзера (Пауза / Збереження стану / Відновлення) — `[ВИКОНАНО]`
 **Мета**: Дозволити зупиняти, зберігати та продовжувати з місця зупинки як процес аналізу, так і процес організації для поточної папки.
-- [ ] **4.1. Модуль `src/family_album_lib/organizer_memento.py`**:
-  - Класи `OrganizerStatus`, `OrganizerMemento`, `OrganizerSaveManager` (збереження у `saves/organizer_save_<hash>.json`).
+- [x] **4.1. Модуль [organizer_memento.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album_lib/organizer_memento.py)**:
+  - Створено класи `OrganizerStatus`, `OrganizerMemento`, `OrganizerSaveManager` (збереження у `saves/organizer_save_<hash>.json`).
   - Підтримка фаз `phase="analyze"` (зберігає вже проаналізовані елементи плану) та `phase="organize"` (зберігає весь план зі статусами `organized`/`skipped`/`pending` та накопичену статистику `OrganizeStats`).
-  - Метод `verify_location(memento)` для перевірки цілісності папки перед відновленням.
-- [ ] **4.2. Інтеграція Memento в `FileOrganizerEngine` та GUI віджет `FileOrganizer`**:
-  - У `scan_and_plan()` пропускати файли, які вже є у відновленому Memento.
-  - У `execute_plan()` пропускати елементи плану зі статусом `organized` або `skipped`, продовжуючи лише `pending`.
-  - Додати кнопки **Save State** та **Resume** у віджет `FileOrganizer`, діалог пропозиції відновлення при виявленні збереженого стану та автоматичне видалення сейву після повного завершення організації.
-- [ ] **4.3. Тестування Кроку 4**:
-  - Написати тести `tests/test_organizer_memento.py` (еквівалентність односесійного та багатосесійного аналізу й організації з паузою та відновленням).
+  - Метод `verify_location(memento)` перевіряє цілісність папки та наявність незавершених (`pending`) файлів перед відновленням.
+- [x] **4.2. Інтеграція Memento в `FileOrganizerEngine` та GUI віджет `FileOrganizer`**:
+  - Додано серіалізацію `to_dict()` / `from_dict()` у `MediaDateResult`, `OrganizePlanItem`, `OrganizeStats`.
+  - У `scan_and_plan()` реалізовано пропуск уже проаналізованих файлів із `existing_items` (без повторного читання з диска).
+  - У `execute_plan()` реалізовано продовження з `initial_stats` і пропуск елементів зі статусом `organized`/`skipped`.
+  - В `OrganizerWorker` додано сигнал `paused(phase, plan, stats, total_files)`.
+  - У [file_organizer.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/gui/widgets/file_organizer.py) додано кнопки **Save State** та **Resume**, перейменовано `Stop` на **Stop / Pause**, реалізовано діалог пропозиції відновлення при виявленні збереженого чекпоїнту та автовидалення сейву після успішного завершення.
+- [x] **4.3. Тестування Кроку 4**:
+  - Написано та пройдено тести [tests/test_organizer_memento.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/tests/test_organizer_memento.py) (5 нових тестів; загалом **59/59 тестів проходять**).
 
 ---
 

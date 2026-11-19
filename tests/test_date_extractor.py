@@ -6,6 +6,7 @@ from datetime import datetime
 from src.family_album.utility_functions.date_extractor import (
     extract_date_from_filename,
     extract_date_from_exif,
+    extract_date_from_video,
     is_valid_date,
     extract_media_date,
     MediaDateResult,
@@ -122,6 +123,13 @@ class TestDateExtractor(unittest.TestCase):
             dt = extract_date_from_exif(photo_with_exif)
             self.assertEqual(dt, datetime(2024, 2, 23, 11, 24, 48))
             mock_er.assert_not_called()
+
+    def test_extract_date_from_video_container_metadata(self):
+        """Extracts creation_time from real MP4 container metadata via date_extractor."""
+        tests_dir = os.path.dirname(os.path.abspath(__file__))
+        video_with_meta = os.path.join(tests_dir, "data", "video", "test_2.mp4")
+        dt = extract_date_from_video(video_with_meta)
+        self.assertEqual(dt, datetime(2021, 10, 4, 12, 59, 50))
 
 
 if __name__ == "__main__":

@@ -1,21 +1,17 @@
 """
 Video utility module for the Family Album application.
 
-Provides functions to identify video files, extract video container metadata
-(resolution, bitrate, duration, frame count, audio tracks), and extract
-recorded creation timestamps using MoviePy and OpenCV.
+Provides functions to identify video files (including animated GIFs),
+quickly read video resolution via OpenCV/Pillow, and extract container
+metadata (resolution, bitrate, duration, frame count, audio tracks, creation_time)
+using MoviePy and OpenCV.
 """
 
-from datetime import datetime
 import os.path
 
 import cv2
 from moviepy.video.io.VideoFileClip import VideoFileClip, AudioFileClip
-import pandas as pd
-from pandas._libs.missing import NAType
 from PIL import Image
-
-from src.family_album.utility_functions.file_utils import get_file_creation_date
 
 VIDEO_EXTENSIONS = (
     '.mp4', '.m4v', '.avi', '.mov', '.mkv', '.wmv', '.flv',
@@ -164,51 +160,6 @@ def get_video_metadata(file_name: str) -> dict:
     return output
 
 
-def get_video_creation_date(file_name: str) -> datetime | NAType:
-    """
-    Extract the original creation date of a video from container metadata.
-
-    Inspects MoviePy/FFmpeg container headers for 'creation_time' tags (common in QuickTime,
-    MP4, and smartphone cameras). Falls back to filesystem creation date if container
-    metadata is absent.
-
-    Args:
-        file_name (str): Absolute path to the video file.
-
-    Returns:
-        datetime | NAType: Parsed datetime object if found, or pandas.NaT otherwise.
-    """
-    output = pd.NaT
-    if not os.path.isfile(file_name):
-        return output
-
-    metadata = get_video_metadata(file_name)
-    if metadata and 'infos' in metadata.keys():
-        infos = metadata['infos']
-        if infos and 'metadata' in infos.keys():
-            meta_data = infos['metadata']
-            if meta_data and 'creation_time' in meta_data.keys():
-                date_time_str = str(meta_data['creation_time']).strip()
-                clean_str = date_time_str.split('.')[0].rstrip('Z')
-                for fmt in (
-                    '%Y-%m-%d %H:%M:%S',
-                    '%Y:%m:%d %H:%M:%S',
-                    '%Y-%m-%dT%H:%M:%S',
-                    '%Y-%m-%d  %H:%M:%S',
-                    '%Y-%m-%d',
-                ):
-                    try:
-                        parsed = datetime.strptime(clean_str, fmt)
-                        if parsed.year >= 1980:
-                            output = parsed
-                            break
-                    except ValueError:
-                        output = pd.NaT
-    if output is pd.NaT:
-        output = get_file_creation_date(file_name)
-    return output
-
-
 def _get_video_meta_data_from_cv2(file_name: str) -> dict:
     """
     Extract video properties using OpenCV VideoCapture.
@@ -272,34 +223,3 @@ def _get_video_meta_data_from_moviepy(file_name: str) -> dict:
                 except Exception:
                     pass
     return output
-
-
-def _open_video(file_name: str) -> None:
-    """
-    Debug playback utility displaying video frames in an OpenCV GUI window.
-
-    Args:
-        file_name (str): Path to video file.
-    """
-    cap = cv2.VideoCapture(file_name)
-
-    if not cap.isOpened():
-        print(f"Cannot open {file_name}")
-        exit()
-
-    while cap.isOpened():
-
-        ret, frame = cap.read()
-
-        # if frame is read correctly ret is True
-        if not ret:
-            print("Stream stopped.")
-            break
-
-        cv2.imshow('Video', frame)
-
-        if cv2.waitKey(1) == ord('q'):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()

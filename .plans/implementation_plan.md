@@ -37,11 +37,11 @@ We have introduced a feature to organize family photos and videos into a structu
   - Pass `AppSettings.worker_threads` to both `ResumableDuplicateAnalyser` and `FileOrganizer` / `OrganizerWorker`.
 - [x] Add unit tests in `tests/test_app_settings.py` (5 passed).
 
-### Step 2: Metadata Extraction Performance Optimization — `[PENDING]`
-- [ ] Optimize `video_utils.py` (`has_video_extension`, `is_file_a_video`, `get_video_resolution_fast`, proper resource cleanup).
-- [ ] Optimize `image_utils.py` (`inspect_image_fast`) and `date_extractor.py` (Pillow Sub-IFD `0x8769` + `exifread` with `details=False`).
-- [ ] Add thread-safety (`check_same_thread=False` and `RLock`) to `OrganizerDatabase` (`organizer_db.py`).
-- [ ] Verify and expand unit tests (`test_video_utils.py`, `test_image_utils.py`, `test_date_extractor.py`, `test_organizer_db.py`).
+### Step 2: Metadata Extraction Performance Optimization — `[COMPLETED]`
+- [x] Optimize `video_utils.py` (`has_video_extension`, `is_file_a_video` with fast Pillow animated GIF check, `get_video_resolution_fast`, proper `cap.release()` / `clip.close()` resource cleanup).
+- [x] Optimize `image_utils.py` (`has_image_extension`, `inspect_image_fast`, context-managed Pillow open) and `date_extractor.py` (`extract_date_from_pil_exif` via Pillow Sub-IFD `0x8769` + `exifread` fallback with `details=False`).
+- [x] Add thread-safety (`check_same_thread=False` and `RLock`) to `OrganizerDatabase` (`organizer_db.py`).
+- [x] Verify and expand unit tests (`test_video_utils.py`, `test_image_utils.py`, `test_date_extractor.py`, `test_organizer_db.py`).
 
 ### Step 3: Multithreaded Analysis & Organization Pipeline (`ThreadPoolExecutor`) — `[PENDING]`
 - [ ] Refactor `FileOrganizerEngine.scan_and_plan()` to analyze files concurrently using `ThreadPoolExecutor(max_workers=...)`.

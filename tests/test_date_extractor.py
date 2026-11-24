@@ -1,10 +1,17 @@
 import os
+import shutil
+import tempfile
 import unittest
 from unittest.mock import patch
 from datetime import datetime
 
+import cv2
+import numpy as np
+from PIL import Image
+
 from src.family_album.utility_functions.date_extractor import (
     extract_date_from_filename,
+    extract_date_from_filesystem,
     extract_date_from_exif,
     extract_date_from_video,
     is_valid_date,
@@ -87,8 +94,15 @@ class TestDateExtractor(unittest.TestCase):
         self.assertFalse(is_valid_date(2020, 2, 30))
         # Future year (> current + 1)
         self.assertFalse(is_valid_date(2099, 1, 1))
-        # Past year (< 1970)
+        # Past dates earlier than default min_valid_date (2000-01-01), including 1970/1980 epochs
         self.assertFalse(is_valid_date(1950, 1, 1))
+        self.assertFalse(is_valid_date(1970, 1, 1))
+        self.assertFalse(is_valid_date(1980, 1, 1))
+        self.assertFalse(is_valid_date(1999, 12, 31))
+        # Boundary accepted with default 2000-01-01
+        self.assertTrue(is_valid_date(2000, 1, 1))
+        # Custom min_date override allows earlier dates when configured
+        self.assertTrue(is_valid_date(1998, 5, 10, min_date=datetime(1995, 1, 1)))
 
     def test_non_date_filenames_return_none(self):
         self.assertIsNone(extract_date_from_filename("wallpaper.jpg"))
@@ -130,6 +144,88 @@ class TestDateExtractor(unittest.TestCase):
         video_with_meta = os.path.join(tests_dir, "data", "video", "test_2.mp4")
         dt = extract_date_from_video(video_with_meta)
         self.assertEqual(dt, datetime(2021, 10, 4, 12, 59, 50))
+
+    def test_google_photos_bogus_1970_1980_exif_falls_back_to_valid_last_modified(self):
+        """
+        Generates a real JPEG with bogus 1970/1980 EXIF dates (simulating Google Photos
+        animations/collages) and a valid Last Modified timestamp (2019-08-22 14:35:00).
+        Verifies 1970/1980 EXIF is rejected and Last Modified is selected via filesystem fallback.
+        """
+        tmp_dir = tempfile.mkdtemp(prefix="test_bogus_exif_")
+        try:
+            jpg_path = os.path.join(tmp_dir, "google_collage_animation.jpg")
+            img = Image.new("RGB", (64, 64), color=(80, 140, 200))
+            exif = img.getexif()
+            exif[306] = "1980:01:01 00:00:00"    # Image DateTime (DOS/ZIP epoch)
+            exif[36867] = "1970:01:01 00:00:00"  # DateTimeOriginal (Unix epoch)
+            exif[36868] = "1980:01:01 00:00:00"  # DateTimeDigitized
+            img.save(jpg_path, "JPEG", exif=exif)
+
+            expected_dt = datetime(2019, 8, 22, 14, 35, 0)
+            expected_ts = expected_dt.timestamp()
+            os.utime(jpg_path, (expected_ts, expected_ts))
+
+            # EXIF extraction must reject 1970 and 1980 under default min_valid_date (2000-01-01)
+            self.assertIsNone(extract_date_from_exif(jpg_path, min_date=datetime(2000, 1, 1)))
+
+            # Full extraction must fall back to Last Modified (2019-08-22)
+            res = extract_media_date(jpg_path, min_date=datetime(2000, 1, 1))
+            self.assertTrue(res.has_date)
+            self.assertEqual(res.source, "filesystem")
+            self.assertEqual(res.date, expected_dt)
+            self.assertEqual(res.year_folder, "2019")
+            self.assertEqual(res.month_folder, "08")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_generated_video_without_metadata_falls_back_to_valid_last_modified(self):
+        """
+        Generates a real small AVI video with no container creation_time and no date in filename,
+        assigns a valid Last Modified timestamp (2021-11-05 08:20:00), and verifies filesystem fallback.
+        """
+        tmp_dir = tempfile.mkdtemp(prefix="test_gen_video_")
+        try:
+            vid_path = os.path.join(tmp_dir, "family_clip_untitled.avi")
+            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+            writer = cv2.VideoWriter(vid_path, fourcc, 10.0, (64, 64))
+            frame = np.zeros((64, 64, 3), dtype=np.uint8)
+            for _ in range(5):
+                writer.write(frame)
+            writer.release()
+
+            expected_dt = datetime(2021, 11, 5, 8, 20, 0)
+            expected_ts = expected_dt.timestamp()
+            os.utime(vid_path, (expected_ts, expected_ts))
+
+            res = extract_media_date(vid_path, min_date=datetime(2000, 1, 1))
+            self.assertTrue(res.has_date)
+            self.assertEqual(res.source, "filesystem")
+            self.assertEqual(res.date, expected_dt)
+            self.assertEqual(res.year_folder, "2021")
+            self.assertEqual(res.month_folder, "11")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_bogus_1980_filesystem_mtime_routes_to_no_date(self):
+        """
+        If a file's Last Modified timestamp itself is an epoch placeholder (< 2000-01-01,
+        e.g., 1980-01-01), filesystem fallback rejects it rather than picking today's st_ctime.
+        """
+        tmp_dir = tempfile.mkdtemp(prefix="test_bogus_mtime_")
+        try:
+            f_path = os.path.join(tmp_dir, "old_zip_extract.png")
+            with open(f_path, "wb") as f:
+                f.write(b"dummy")
+            bogus_ts = datetime(1980, 1, 1, 0, 0, 0).timestamp()
+            os.utime(f_path, (bogus_ts, bogus_ts))
+
+            self.assertIsNone(extract_date_from_filesystem(f_path, min_date=datetime(2000, 1, 1)))
+            res = extract_media_date(f_path, min_date=datetime(2000, 1, 1))
+            self.assertFalse(res.has_date)
+            self.assertEqual(res.source, "none")
+            self.assertEqual(res.year_folder, "No_Date")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

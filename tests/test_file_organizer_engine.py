@@ -5,6 +5,10 @@ import unittest
 from datetime import datetime
 from unittest.mock import patch
 
+import cv2
+import numpy as np
+from PIL import Image
+
 from src.family_album_lib.file_organizer_engine import (
     FileOrganizerEngine,
     OrganizerWorker,
@@ -36,6 +40,9 @@ class TestFileOrganizerEngine(unittest.TestCase):
         self.file3 = os.path.join(self.source_dir, "random_untitled.png")
         with open(self.file3, "wb") as f:
             f.write(b"no_date_content")
+        # Assign pre-2000 placeholder epoch (1980-01-01) so it genuinely routes to No_Date
+        bogus_ts = datetime(1980, 1, 1, 0, 0, 0).timestamp()
+        os.utime(self.file3, (bogus_ts, bogus_ts))
 
     def tearDown(self):
         shutil.rmtree(self.temp_root, ignore_errors=True)
@@ -274,6 +281,72 @@ class TestFileOrganizerEngine(unittest.TestCase):
         self.assertTrue(plan[0].is_video)
         self.assertRegex(plan[0].resolution, r"^\d+x\d+$")
         self.assertEqual(plan[0].date_result.source, "filename")
+
+    def test_scan_and_plan_bogus_exif_photo_and_video_use_last_modified(self):
+        """
+        End-to-end organizer test:
+        - Generated JPEG with invalid 1970/1980 EXIF dates + valid Last Modified (2019-08-22) -> 2019/08 (filesystem)
+        - Generated AVI video with no container date + valid Last Modified (2021-11-05) -> 2021/11 (filesystem)
+        - File with invalid 1980 Last Modified -> No_Date (none)
+        """
+        mix_src = os.path.join(self.temp_root, "mix_src")
+        mix_dst = os.path.join(self.temp_root, "mix_dst")
+        os.makedirs(mix_src, exist_ok=True)
+
+        # 1. Generated JPEG with bogus 1970/1980 EXIF + valid Last Modified
+        jpg_path = os.path.join(mix_src, "google_animation_01.jpg")
+        img = Image.new("RGB", (80, 60), color=(40, 120, 180))
+        exif = img.getexif()
+        exif[306] = "1980:01:01 00:00:00"
+        exif[36867] = "1970:01:01 00:00:00"
+        img.save(jpg_path, "JPEG", exif=exif)
+        ts_jpg = datetime(2019, 8, 22, 14, 35, 0).timestamp()
+        os.utime(jpg_path, (ts_jpg, ts_jpg))
+
+        # 2. Generated small AVI video with no metadata date + valid Last Modified
+        vid_path = os.path.join(mix_src, "home_clip.avi")
+        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+        writer = cv2.VideoWriter(vid_path, fourcc, 10.0, (64, 64))
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        for _ in range(5):
+            writer.write(frame)
+        writer.release()
+        ts_vid = datetime(2021, 11, 5, 8, 20, 0).timestamp()
+        os.utime(vid_path, (ts_vid, ts_vid))
+
+        # 3. File with bogus 1980 Last Modified -> No_Date
+        nodate_path = os.path.join(mix_src, "undated_archive.png")
+        with open(nodate_path, "wb") as f:
+            f.write(b"raw_bytes")
+        ts_bad = datetime(1980, 1, 1, 0, 0, 0).timestamp()
+        os.utime(nodate_path, (ts_bad, ts_bad))
+
+        plan = FileOrganizerEngine.scan_and_plan(
+            source_dir=mix_src,
+            target_dir=mix_dst,
+            mode="new_organization",
+            action_type="copy",
+            max_workers=4,
+        )
+        by_name = {item.file_name: item for item in plan}
+
+        jpg_item = by_name["google_animation_01.jpg"]
+        self.assertTrue(jpg_item.is_image)
+        self.assertEqual(jpg_item.resolution, "80x60")
+        self.assertEqual(jpg_item.date_result.source, "filesystem")
+        self.assertEqual(jpg_item.date_result.year_folder, "2019")
+        self.assertEqual(jpg_item.date_result.month_folder, "08")
+
+        vid_item = by_name["home_clip.avi"]
+        self.assertTrue(vid_item.is_video)
+        self.assertEqual(vid_item.resolution, "64x64")
+        self.assertEqual(vid_item.date_result.source, "filesystem")
+        self.assertEqual(vid_item.date_result.year_folder, "2021")
+        self.assertEqual(vid_item.date_result.month_folder, "11")
+
+        nodate_item = by_name["undated_archive.png"]
+        self.assertEqual(nodate_item.date_result.source, "none")
+        self.assertEqual(nodate_item.date_result.year_folder, "No_Date")
 
 
 if __name__ == "__main__":

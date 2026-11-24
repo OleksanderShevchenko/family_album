@@ -132,21 +132,21 @@ flowchart TD
 
 ---
 
-### Крок 5: Мінімальна валідна дата (`2000-01-01`) у налаштуваннях + Fallback на `Last Modified` файлу — `[ПОТОЧНИЙ КРОК]`
+### Крок 5: Мінімальна валідна дата (`2000-01-01`) у налаштуваннях + Fallback на `Last Modified` файлу — `[ВИКОНАНО]`
 **Проблема (виявлена на реальному домашньому архіві)**:
 1. Занадто багато файлів без EXIF і без дати в імені потрапляли до `No_Date/`, хоча у властивостях файлу (`Last Modified`) була валідна дата.
 2. Згенеровані анімації та колажі з Google Photos містили фіктивні епохові дати `1970-01-01` та `1980-01-01`, які при виборі найранішої дати перебивали реальну дату файлу.
 
 **Завдання**:
-- [ ] **5.1. Мінімальна валідна дата в `AppSettings` та `SettingsDialog`**:
-  - Додати поле `min_valid_date` (ISO `"YYYY-MM-DD"`, за замовчуванням `"2000-01-01"`) та властивість `min_valid_datetime` у [app_settings.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album_lib/app_settings.py).
-  - Додати `QDateEdit` (із календарем та кнопкою `Reset (2000-01-01)`) у [settings_dialog.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/gui/dialogs/settings_dialog.py) (`Tools -> Settings...`).
-- [ ] **5.2. Фільтрація дат за `min_valid_date` та Fallback на системні дати файлу (`os.stat`)**:
-  - Оновити `is_valid_date()` у [date_extractor.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/utility_functions/date_extractor.py), щоб відсіювати будь-які дати `< min_valid_date` (відкидає `1970` і `1980` роки).
-  - Додати функцію `extract_date_from_filesystem(file_path, min_date)` (бере найранішу валідну дату серед `st_mtime`, `st_ctime`, `st_birthtime`, яка задовольняє `min_valid_date <= dt <= now + 1 рік`).
-  - Підключити filesystem fallback як Пріоритет №3 у `FileOrganizerEngine._inspect_single_file()` (`Filename` $\rightarrow$ `EXIF / Video` $\rightarrow$ `File System (Last Modified)` $\rightarrow$ `No_Date/`).
-- [ ] **5.3. Тестування Кроку 5**:
-  - Тести у `test_app_settings.py`, `test_date_extractor.py` (фільтрація `1970`/`1980` Google Photos артефактів, збереження `min_valid_date`) та `test_file_organizer_engine.py` (маршрутизація за `Last Modified` та `No_Date/` лише для невалідних дат).
+- [x] **5.1. Мінімальна валідна дата в `AppSettings` та `SettingsDialog`**:
+  - Додано поле `min_valid_date` (ISO `"YYYY-MM-DD"`, за замовчуванням `"2000-01-01"`) та властивість `min_valid_datetime` у [app_settings.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album_lib/app_settings.py).
+  - Додано `QDateEdit` (із календарем та кнопкою `Reset (2000-01-01)`) у [settings_dialog.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/gui/dialogs/settings_dialog.py) (`Tools -> Settings...`) та інвалідацію кешованого плану в `MainWindow` при зміні порогу.
+- [x] **5.2. Фільтрація дат за `min_valid_date` та Fallback на системні дати файлу (`os.stat`)**:
+  - Оновлено `is_valid_date()` у [date_extractor.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/utility_functions/date_extractor.py) для фільтрації будь-яких дат `< min_valid_date` (відкидає `1970` і `1980` роки).
+  - Додано функцію `extract_date_from_filesystem(file_path, min_date)` (бере найранішу валідну дату серед `st_mtime`, `st_ctime`, `st_birthtime`, але відхиляє файли, чий власний `st_mtime < min_date`, щоб не підставляти сьогоднішній `st_ctime` для 1980-епохових ZIP-архівів).
+  - Підключено filesystem fallback як Пріоритет №3 у `FileOrganizerEngine._inspect_single_file()` (`Filename` $\rightarrow$ `EXIF / Video` $\rightarrow$ `File System (Last Modified)` $\rightarrow$ `No_Date/`).
+- [x] **5.3. Тестування Кроку 5**:
+  - Додано тести у [test_app_settings.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/tests/test_app_settings.py), [test_date_extractor.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/tests/test_date_extractor.py) та [test_file_organizer_engine.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/tests/test_file_organizer_engine.py) зі згенерованим JPEG (фіктивні EXIF `1970`/`1980` + валідний `Last Modified` `2019-08-22`), згенерованим AVI-відео без метаданих + валідний `Last Modified` (`2021-11-05`) та перевіркою `No_Date/` для 1980-епохи — **63/63 тести проходять**.
 
 ---
 

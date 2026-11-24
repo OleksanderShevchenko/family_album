@@ -55,13 +55,13 @@ We have introduced a feature to organize family photos and videos into a structu
 - [x] Add `Save State` and `Resume` buttons to `FileOrganizer` widget and support pausing/saving/resuming from the exact checkpoint for both analysis and organization.
 - [x] Add 5 unit tests in `tests/test_organizer_memento.py` (59 passed total).
 
-### Step 5: Configurable Minimum Valid Date (`2000-01-01`) & Filesystem `Last Modified` Fallback — `[NEXT]`
-- [ ] Add `min_valid_date` (`"2000-01-01"` default) to `AppSettings` (`.settings/settings.json`) and a `QDateEdit` selector + reset button to `SettingsDialog` (`Tools -> Settings...`).
-- [ ] Enforce `min_valid_date` across all date sources in `date_extractor.py` to reject bogus `1970`/`1980` epoch dates from Google Photos animations/collages and ZIP archives.
-- [ ] Enable OS filesystem timestamp fallback (`extract_date_from_filesystem` using earliest valid `st_mtime`/`st_ctime`/`st_birthtime`) in `FileOrganizerEngine._inspect_single_file()` as Priority #3 before routing to `No_Date/`.
-- [ ] Add unit tests in `test_app_settings.py`, `test_date_extractor.py`, and `test_file_organizer_engine.py`.
+### Step 5: Configurable Minimum Valid Date (`2000-01-01`) & Filesystem `Last Modified` Fallback — `[COMPLETED]`
+- [x] Add `min_valid_date` (`"2000-01-01"` default) to `AppSettings` (`.settings/settings.json`) and a `QDateEdit` selector + reset button to `SettingsDialog` (`Tools -> Settings...`).
+- [x] Enforce `min_valid_date` across all date sources in `date_extractor.py` to reject bogus `1970`/`1980` epoch dates from Google Photos animations/collages and ZIP archives.
+- [x] Enable OS filesystem timestamp fallback (`extract_date_from_filesystem` using earliest valid `st_mtime`/`st_ctime`/`st_birthtime`, rejecting pre-`min_valid_date` `st_mtime` placeholders) in `FileOrganizerEngine._inspect_single_file()` as Priority #3 before routing to `No_Date/`.
+- [x] Add unit tests in `test_app_settings.py`, `test_date_extractor.py`, and `test_file_organizer_engine.py` with generated JPEG (bogus 1970/1980 EXIF + valid Last Modified) and generated AVI video (63 passed).
 
-### Step 6: Multithreaded Resumable Duplicate Verification (`ResumableDuplicatesVerifier`) — `[PENDING]`
+### Step 6: Multithreaded Resumable Duplicate Verification (`ResumableDuplicatesVerifier`) — `[NEXT]`
 - [ ] Create `src/family_album_lib/resumable_duplicates_verifier.py` (`ResumableDuplicatesVerifier`), modeled after `ResumableDuplicateAnalyser`:
   - Uses `ThreadPoolExecutor(max_workers=AppSettings.worker_threads)` to verify only detected duplicate groups (comparing exact byte sizes of original vs. candidate duplicates).
   - Supports cooperative pause/stop, progress/log callbacks, and Memento state save/restore so verification can be resumed even after restarting the app on another day.

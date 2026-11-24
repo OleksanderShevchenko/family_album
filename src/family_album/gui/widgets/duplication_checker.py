@@ -2,7 +2,7 @@ import json
 import os.path
 import shutil
 import sys
-from typing import Optional
+from typing import List, Optional
 
 import cv2
 from PyQt6 import QtWidgets, uic, QtGui, QtCore
@@ -18,9 +18,11 @@ from src.family_album.utility_functions.image_utils import is_image_file
 from src.family_album.utility_functions.video_utils import is_file_a_video
 from src.family_album_lib.app_settings import AppSettings
 from src.family_album_lib.resumable_duplicate_analyser import ResumableDuplicateAnalyser
+from src.family_album_lib.resumable_duplicates_verifier import ResumableDuplicatesVerifier
 from src.family_album_lib.duplication_memento import (
     DuplicationSaveManager,
-    DuplicationCheckStatus
+    DuplicationCheckStatus,
+    DuplicationStage,
 )
 
 
@@ -128,6 +130,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
     AnalysisStarted = pyqtSignal(str)
     ProgressUpdated = pyqtSignal(int, int)
     AnalysisFinished = pyqtSignal(str)
+    VerificationFinished = pyqtSignal(str)
     LogEventEmitted = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -138,23 +141,30 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
 
         self._save_manager: DuplicationSaveManager = DuplicationSaveManager("saves")
 
-        # Create control buttons for state management
+        # Create control buttons for state management and Stage 2 verification
         self.pbStop = QtWidgets.QPushButton("Stop / Pause", parent=self)
-        self.pbStop.setToolTip("Stop or pause the active duplicate check process")
+        self.pbStop.setToolTip("Stop or pause the active duplicate check or verification process")
         self.pbStop.clicked.connect(self.evt_stop_duplication)
 
         self.pbSaveState = QtWidgets.QPushButton("Save State", parent=self)
-        self.pbSaveState.setToolTip("Save current check progress to 'saves' folder")
+        self.pbSaveState.setToolTip("Save current check or verification progress to 'saves' folder")
         self.pbSaveState.clicked.connect(self.evt_save_state)
 
         self.pbResume = QtWidgets.QPushButton("Resume Check", parent=self)
-        self.pbResume.setToolTip("Resume check from saved state")
+        self.pbResume.setToolTip("Resume duplicate check or verification from saved/paused state")
         self.pbResume.clicked.connect(self.evt_resume_duplication)
 
-        # Insert new control buttons into the layout
+        self.pbVerifyDuplicates = QtWidgets.QPushButton("Verify Duplicates", parent=self)
+        self.pbVerifyDuplicates.setToolTip(
+            "Verify detected duplicate groups by comparing exact file sizes (Stage 2)"
+        )
+        self.pbVerifyDuplicates.clicked.connect(self.evt_verify_duplicates)
+
+        # Insert control buttons into the layout
         self.horizontalLayout.insertWidget(2, self.pbStop)
         self.horizontalLayout.insertWidget(3, self.pbSaveState)
         self.horizontalLayout.insertWidget(4, self.pbResume)
+        self.horizontalLayout.insertWidget(5, self.pbVerifyDuplicates)
 
         # Video player components using OpenCV frame renderer
         self._videoPlayerOriginal = VideoPlayerWidget(self)
@@ -169,6 +179,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
         self.AnalysisStarted.connect(self._on_analysis_started)
         self.ProgressUpdated.connect(self._on_progress_updated)
         self.AnalysisFinished.connect(self._on_analysis_finished)
+        self.VerificationFinished.connect(self._on_verification_finished)
         self.LogEventEmitted.connect(self._on_log_event)
 
         self._selected_path: str = ""
@@ -191,12 +202,20 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
         self.lst_duplications.customContextMenuRequested.connect(self.evt_show_context_menu)
 
         self._duplication_checker: Optional[ResumableDuplicateAnalyser] = None
+        self._verifier: Optional[ResumableDuplicatesVerifier] = None
+        self._active_stage: str = DuplicationStage.HASHING.value
+        self._verification_completed: bool = False
+        self._last_mismatched_files: List[dict] = []
         self._update_button_states()
 
     def clear_results(self) -> None:
-        """Clears stored duplication hashes, result lists, image preview labels, and video players."""
+        """Clears stored duplication hashes, verification state, result lists, and previews."""
         self.files_hash = {}
         self.duplications = {}
+        self._verifier = None
+        self._active_stage = DuplicationStage.HASHING.value
+        self._verification_completed = False
+        self._last_mismatched_files = []
         self.lst_original_files.setModel(QStringListModel([]))
         self.lst_duplications.setModel(QStringListModel([]))
         self.lblOriginalImage.clear()
@@ -216,15 +235,17 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
 
     @property
     def max_workers(self) -> int:
-        """Return configured number of worker threads for duplicate analysis."""
+        """Return configured number of worker threads for duplicate analysis and verification."""
         return self._max_workers
 
     @max_workers.setter
     def max_workers(self, value: int) -> None:
-        """Update worker thread count and propagate to active analyser if present."""
+        """Update worker thread count and propagate to active analyser and verifier if present."""
         self._max_workers = max(1, int(value))
         if self._duplication_checker is not None:
             self._duplication_checker.num_of_threads = self._max_workers
+        if self._verifier is not None:
+            self._verifier.num_of_threads = self._max_workers
 
     @property
     def selected_path(self) -> str:
@@ -232,6 +253,10 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
 
     @selected_path.setter
     def selected_path(self, new_path: str) -> None:
+        if self._verifier is not None:
+            self._verifier.stop_verification()
+        if self._duplication_checker is not None:
+            self._duplication_checker.stop_analysis()
         self.clear_results()
         if os.path.isdir(new_path):
             norm_path = os.path.normpath(new_path)
@@ -248,12 +273,21 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
 
             if self._save_manager.has_save(norm_path):
                 memento = self._save_manager.load_memento(norm_path)
-                checked_count = len(memento.processed_files) if memento else 0
-                total_count = memento.files_count if memento else 0
-                self.lblInfo.setText(
-                    f"Saved state found for this directory ({checked_count}/{total_count} files checked). "
-                    f"Click 'Resume Check' to continue or 'Check for duplicate' to start fresh."
-                )
+                if memento and memento.stage == DuplicationStage.VERIFYING.value:
+                    verified_count = len(memento.verified_originals)
+                    total_groups = memento.candidate_duplicate_groups_count
+                    self.lblInfo.setText(
+                        f"Saved verification state found for this directory "
+                        f"({verified_count}/{total_groups} duplicate groups verified). "
+                        f"Click 'Resume Check' to continue verification or 'Check for duplicate' to start fresh."
+                    )
+                else:
+                    checked_count = len(memento.processed_files) if memento else 0
+                    total_count = memento.files_count if memento else 0
+                    self.lblInfo.setText(
+                        f"Saved state found for this directory ({checked_count}/{total_count} files checked). "
+                        f"Click 'Resume Check' to continue or 'Check for duplicate' to start fresh."
+                    )
             else:
                 self.lblInfo.setText("<>")
         else:
@@ -264,17 +298,68 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
 
         self._update_button_states()
 
+    def _get_active_status(self) -> DuplicationCheckStatus:
+        """Return lifecycle status of whichever stage (hashing or verifying) is currently active."""
+        if self._active_stage == DuplicationStage.VERIFYING.value and self._verifier is not None:
+            return self._verifier.status
+        if self._duplication_checker is not None:
+            return self._duplication_checker.status
+        return DuplicationCheckStatus.IDLE
+
     def _on_analysis_started(self, msg: str) -> None:
         if hasattr(self._parent, 'evt_start_analysis'):
             self._parent.evt_start_analysis(msg)
 
     def _on_progress_updated(self, finished: int, total: int) -> None:
+        if self._active_stage == DuplicationStage.VERIFYING.value:
+            # Update progress bar directly without invoking MainWindow.evt_finish_analysis
+            # (which unconditionally calls populate_duplications for Stage 1).
+            if self._parent is not None and hasattr(self._parent, 'progressBar'):
+                progress = int(finished / total * 100) if total > 0 else 0
+                if self._parent.progressBar.value() < progress <= self._parent.progressBar.maximum():
+                    self._parent.progressBar.setValue(progress)
+                    msg = f"Verified {finished} of {total} duplicate groups"
+                    if hasattr(self._parent, 'statusBar'):
+                        self._parent.statusBar().showMessage(
+                            msg, getattr(self._parent, '_interval', 3000)
+                        )
+            return
+
         if hasattr(self._parent, 'evt_update_progress'):
             self._parent.evt_update_progress(finished, total)
 
     def _on_analysis_finished(self, msg: str) -> None:
+        if self._active_stage != DuplicationStage.HASHING.value:
+            return
         if hasattr(self._parent, 'evt_finish_analysis'):
             self._parent.evt_finish_analysis(msg)
+
+    def _on_verification_finished(self, msg: str) -> None:
+        """Finalize Stage 2 duplicate verification, update UI lists, and log verification report."""
+        if self._parent is not None:
+            if hasattr(self._parent, 'dir_viewer') and self._parent.dir_viewer:
+                self._parent.dir_viewer.setEnabled(True)
+            if hasattr(self._parent, 'progressBar'):
+                self._parent.progressBar.setValue(0)
+                self._parent.progressBar.setVisible(False)
+                self._parent.progressBar.setTextVisible(False)
+            if hasattr(self._parent, 'statusBar'):
+                self._parent.statusBar().showMessage(
+                    msg, getattr(self._parent, '_interval', 3000)
+                )
+
+        if self._verifier is not None:
+            self.duplications = dict(self._verifier.verified_duplicates)
+            if self._verifier.files_hashes:
+                self.files_hash = dict(self._verifier.files_hashes)
+            self._last_mismatched_files = list(self._verifier.mismatched_files)
+            self._verification_completed = True
+
+        if self._save_manager and self.selected_path:
+            self._save_manager.delete_save(self.selected_path)
+
+        self._populate_verified_results()
+        self._update_button_states()
 
     def _on_log_event(self, msg: str) -> None:
         if hasattr(self._parent, 'log_event'):
@@ -283,7 +368,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
     def _update_button_states(self, is_running: bool = False) -> None:
         has_path = bool(self.selected_path and os.path.isdir(self.selected_path))
         has_save = has_path and self._save_manager.has_save(self.selected_path)
-        status = self._duplication_checker.status if self._duplication_checker else DuplicationCheckStatus.IDLE
+        status = self._get_active_status()
 
         is_active = is_running or status == DuplicationCheckStatus.RUNNING
         if hasattr(self._parent, 'dir_viewer') and self._parent.dir_viewer:
@@ -295,6 +380,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self.pbStop.setEnabled(True)
             self.pbSaveState.setEnabled(False)
             self.pbResume.setEnabled(False)
+            self.pbVerifyDuplicates.setEnabled(False)
             self.pbDumpDuplications.setEnabled(False)
             self.pbMove.setEnabled(False)
         elif status == DuplicationCheckStatus.PAUSED:
@@ -302,7 +388,8 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self.pbCheckDuplications.setEnabled(has_path)
             self.pbStop.setEnabled(False)
             self.pbSaveState.setEnabled(True)
-            self.pbResume.setEnabled(has_save)
+            self.pbResume.setEnabled(True)
+            self.pbVerifyDuplicates.setEnabled(False)
             self.pbDumpDuplications.setEnabled(False)
             self.pbMove.setEnabled(False)
         else:  # IDLE or COMPLETED
@@ -312,6 +399,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self.pbSaveState.setEnabled(False)
             self.pbResume.setEnabled(has_save)
             has_dups = bool(self.duplications)
+            self.pbVerifyDuplicates.setEnabled(has_dups)
             self.pbDumpDuplications.setEnabled(has_dups)
             self.pbMove.setEnabled(has_dups)
 
@@ -338,6 +426,7 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
                 self._save_manager.delete_save(self.selected_path)
 
         self.clear_results()
+        self._active_stage = DuplicationStage.HASHING.value
         self._duplication_checker.reset()
         try:
             self._update_button_states(is_running=True)
@@ -349,7 +438,72 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self.LogEventEmitted.emit(m)
             self._update_button_states(is_running=False)
 
+    def evt_verify_duplicates(self) -> None:
+        """Start Stage 2 multithreaded byte-size verification over detected duplicate groups."""
+        if not self.selected_path or not self.duplications:
+            self.__show_message("No duplicate groups available to verify.")
+            return
+
+        files_hashes = dict(self.files_hash)
+        if not files_hashes and self._duplication_checker is not None:
+            files_hashes = dict(self._duplication_checker.files_hashes)
+
+        processed_files = (
+            dict(self._duplication_checker.processed_files)
+            if self._duplication_checker is not None
+            else {p: h for h, paths in files_hashes.items() for p in paths}
+        )
+        files_count = (
+            self._duplication_checker.files_count_in_directory
+            if self._duplication_checker is not None
+            else len(processed_files)
+        )
+        subdirs_count = (
+            self._duplication_checker.subdirectories_count_in_directory
+            if self._duplication_checker is not None
+            else 0
+        )
+
+        self._active_stage = DuplicationStage.VERIFYING.value
+        self._verification_completed = False
+        self._last_mismatched_files = []
+
+        self._verifier = ResumableDuplicatesVerifier(
+            directory=self.selected_path,
+            duplicate_files=self.duplications,
+            files_hashes=files_hashes,
+            processed_files=processed_files,
+            files_count=files_count,
+            subdirectories_count=subdirs_count,
+            start_verification=self.AnalysisStarted.emit,
+            update_progress=self.ProgressUpdated.emit,
+            log_event=self.LogEventEmitted.emit,
+            finish_verification=self.VerificationFinished.emit,
+            max_workers=self._max_workers,
+        )
+
+        try:
+            self._update_button_states(is_running=True)
+            msg = f"Starting Stage 2 duplicate verification for {len(self.duplications)} group(s)..."
+            self.lblInfo.setText(msg)
+            self.LogEventEmitted.emit(msg)
+            self._verifier.start_verification_thread(run_in_background=True)
+        except Exception as err:
+            m = f"Error starting verification: {err}"
+            print(m)
+            self.__show_message(m)
+            self.LogEventEmitted.emit(m)
+            self._update_button_states(is_running=False)
+
     def evt_stop_duplication(self) -> None:
+        if self._active_stage == DuplicationStage.VERIFYING.value and self._verifier is not None:
+            self._verifier.stop_verification()
+            msg = "Duplicate verification process was paused by user."
+            self.lblInfo.setText(msg)
+            self.LogEventEmitted.emit(msg)
+            self._update_button_states()
+            return
+
         if self._duplication_checker:
             self._duplication_checker.stop_analysis()
             msg = "Duplicate check process was paused by user."
@@ -358,7 +512,30 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self._update_button_states()
 
     def evt_save_state(self) -> None:
-        if not self._duplication_checker or not self.selected_path:
+        if not self.selected_path:
+            self.__show_message("No active location to save state for.")
+            return
+
+        if self._active_stage == DuplicationStage.VERIFYING.value and self._verifier is not None:
+            try:
+                memento = self._verifier.create_memento()
+                saved_path = self._save_manager.save_memento(memento)
+                msg = (
+                    f"Verification state successfully saved to '{saved_path}' "
+                    f"({len(memento.verified_originals)}/{memento.candidate_duplicate_groups_count} groups verified)"
+                )
+                self.lblInfo.setText(msg)
+                self.__show_message(msg)
+                self.LogEventEmitted.emit(msg)
+                self._update_button_states()
+            except Exception as err:
+                m = f"Error saving verification state: {err}"
+                print(m)
+                self.__show_message(m)
+                self.LogEventEmitted.emit(m)
+            return
+
+        if not self._duplication_checker:
             self.__show_message("No active location to save state for.")
             return
         try:
@@ -379,7 +556,34 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
         if not self.selected_path or not self._duplication_checker:
             return
 
+        # Support resuming directly from an in-memory pause even before saving to disk
         if not self._save_manager.has_save(self.selected_path):
+            if (
+                self._active_stage == DuplicationStage.VERIFYING.value
+                and self._verifier is not None
+                and self._verifier.status == DuplicationCheckStatus.PAUSED
+            ):
+                self._update_button_states(is_running=True)
+                msg = (
+                    f"Resuming duplicate verification "
+                    f"({self._verifier.verified_groups_count}/{self._verifier.total_groups_count} groups verified)..."
+                )
+                self.lblInfo.setText(msg)
+                self.LogEventEmitted.emit(msg)
+                self._verifier.start_verification_thread(run_in_background=True)
+                return
+
+            if self._duplication_checker.status == DuplicationCheckStatus.PAUSED:
+                self._update_button_states(is_running=True)
+                msg = (
+                    f"Resuming duplicate check "
+                    f"({len(self._duplication_checker.processed_files)}/{self._duplication_checker.files_count_in_directory} checked)..."
+                )
+                self.lblInfo.setText(msg)
+                self.LogEventEmitted.emit(msg)
+                self._duplication_checker.start_analysis_thread(run_in_background=True)
+                return
+
             self.__show_message("No saved state found for current location.")
             return
 
@@ -404,12 +608,39 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             return
 
         try:
-            self._duplication_checker.restore_memento(memento)
-            self._update_button_states(is_running=True)
-            msg = f"Resuming duplicate check from saved state ({len(memento.processed_files)}/{memento.files_count} checked)..."
-            self.lblInfo.setText(msg)
-            self.LogEventEmitted.emit(msg)
-            self._duplication_checker.start_analysis_thread(run_in_background=True)
+            if memento.stage == DuplicationStage.VERIFYING.value:
+                # Restore Stage 1 context so hashes, dump, move, and duplicate_directories stay intact
+                self._duplication_checker.restore_memento(memento)
+                self.files_hash = dict(memento.files_hashes)
+
+                self._active_stage = DuplicationStage.VERIFYING.value
+                self._verification_completed = False
+                self._verifier = ResumableDuplicatesVerifier(
+                    directory=self.selected_path,
+                    start_verification=self.AnalysisStarted.emit,
+                    update_progress=self.ProgressUpdated.emit,
+                    log_event=self.LogEventEmitted.emit,
+                    finish_verification=self.VerificationFinished.emit,
+                    max_workers=self._max_workers,
+                )
+                self._verifier.restore_memento(memento)
+                self._update_button_states(is_running=True)
+                msg = (
+                    f"Resuming duplicate verification from saved state "
+                    f"({len(memento.verified_originals)}/{memento.candidate_duplicate_groups_count} groups verified)..."
+                )
+                self.lblInfo.setText(msg)
+                self.LogEventEmitted.emit(msg)
+                self._verifier.start_verification_thread(run_in_background=True)
+            else:
+                self._active_stage = DuplicationStage.HASHING.value
+                self._verifier = None
+                self._duplication_checker.restore_memento(memento)
+                self._update_button_states(is_running=True)
+                msg = f"Resuming duplicate check from saved state ({len(memento.processed_files)}/{memento.files_count} checked)..."
+                self.lblInfo.setText(msg)
+                self.LogEventEmitted.emit(msg)
+                self._duplication_checker.start_analysis_thread(run_in_background=True)
         except Exception as err:
             m = f"Error resuming state: {err}"
             print(m)
@@ -418,8 +649,12 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self._update_button_states()
 
     def populate_duplications(self) -> None:
+        if self._active_stage == DuplicationStage.VERIFYING.value:
+            return
         self.files_hash = {}
         self.duplications = {}
+        self._verification_completed = False
+        self._last_mismatched_files = []
         try:
             self.duplications = self._duplication_checker.duplicate_files
             self.files_hash = self._duplication_checker.files_hashes
@@ -433,6 +668,72 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self.LogEventEmitted.emit(m)
         finally:
             self._update_button_states()
+
+    def _populate_verified_results(self) -> None:
+        """Refresh UI list views and log detailed summary after Stage 2 verification completes."""
+        original_files = list(self.duplications.keys())
+        verified_groups = len(self.duplications)
+        verified_dup_files = sum(len(v) for v in self.duplications.values())
+        mismatched_count = len(self._last_mismatched_files)
+        failed_count = len(self._verifier.failed_files) if self._verifier else 0
+        total_checked_groups = self._verifier.total_groups_count if self._verifier else verified_groups
+
+        self.lst_original_files.setModel(QStringListModel(original_files))
+        self.lst_original_files.selectionModel().currentChanged.connect(self.evt_original_file_selected)
+        self.lst_duplications.setModel(QStringListModel([]))
+
+        if original_files:
+            summary_msg = (
+                f"Verification complete ({total_checked_groups} groups checked): "
+                f"{verified_groups} verified group(s) ({verified_dup_files} confirmed duplicates), "
+                f"{mismatched_count} size mismatch(es) excluded."
+            )
+            self.ItemSelected.emit(summary_msg)
+            self.lblInfo.setText(summary_msg)
+        else:
+            summary_msg = (
+                f"Verification complete ({total_checked_groups} groups checked): "
+                f"no confirmed duplicates remain ({mismatched_count} size mismatch(es) excluded)."
+            )
+            self.lblInfo.setText(summary_msg)
+
+        self._log_verification_summary(
+            total_checked_groups,
+            verified_groups,
+            verified_dup_files,
+            mismatched_count,
+            failed_count,
+        )
+
+    def _log_verification_summary(
+        self,
+        total_groups: int,
+        verified_groups: int,
+        verified_dup_files: int,
+        mismatched_count: int,
+        failed_count: int,
+    ) -> None:
+        """Emit a structured Stage 2 verification summary report to the log console."""
+        lines = [
+            "==================================================",
+            "✅ DUPLICATE VERIFICATION SUMMARY REPORT (Stage 2)",
+            "==================================================",
+            f"📁 Target Location: {self.selected_path}",
+            f"🔍 Candidate Groups Checked: {total_groups}",
+            f"✅ Verified Duplicate Groups: {verified_groups} ({verified_dup_files} confirmed duplicate files)",
+            f"⚠️ Size Mismatches Excluded (Potential Collisions): {mismatched_count}",
+            f"❌ Unreadable Files: {failed_count}",
+        ]
+        if self._last_mismatched_files:
+            lines.append("--------------------------------------------------")
+            lines.append("⚠️ EXCLUDED MISMATCHED CANDIDATES:")
+            for item in self._last_mismatched_files:
+                lines.append(
+                    f"   • Original: '{item['original']}' ({item['original_size']} bytes) "
+                    f"vs Candidate: '{item['candidate']}' ({item['candidate_size']} bytes)"
+                )
+        lines.append("==================================================")
+        self.LogEventEmitted.emit("\n".join(lines))
 
     def __populate_files(self):
         original_files = list(self.duplications.keys())
@@ -679,6 +980,13 @@ class DuplicationChecker(QtWidgets.QWidget, Ui_Form):
             self.duplications.pop(original_file)
             duplication_list.remove(duplicate_file)
             self.duplications[duplicate_file] = duplication_list
+
+            # Keep Stage 1 files_hash bucket ordering aligned so Stage 2 mementos reflect the chosen original
+            for paths in self.files_hash.values():
+                if original_file in paths and duplicate_file in paths:
+                    paths.remove(duplicate_file)
+                    paths.insert(0, duplicate_file)
+                    break
         else:
             m = f"Error switching original and duplication files - duplicate files in originals or original is absent."
             print(m)

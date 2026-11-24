@@ -7,6 +7,7 @@ cores and initializes `worker_threads` to `cpu_cores * 2` (clamped to a safe ran
 and persists the configuration file to disk.
 """
 
+from datetime import datetime
 import json
 import os
 import sys
@@ -47,6 +48,7 @@ class AppSettings:
     DEFAULT_THREAD_MULTIPLIER = 2
     MIN_THREADS = 1
     MAX_THREADS = 256
+    DEFAULT_MIN_VALID_DATE = "2000-01-01"
 
     _instance: Optional["AppSettings"] = None
 
@@ -64,6 +66,7 @@ class AppSettings:
 
         self._worker_threads: int = self.calculate_recommended_threads()
         self._last_selected_directory: str = ""
+        self._min_valid_date: str = self.DEFAULT_MIN_VALID_DATE
 
         self.load()
 
@@ -151,6 +154,43 @@ class AppSettings:
         """
         self._last_selected_directory = os.path.normpath(path) if path else ""
 
+    @property
+    def min_valid_date(self) -> str:
+        """
+        Minimum valid media creation date threshold in ISO format ('YYYY-MM-DD').
+
+        Dates earlier than this threshold (e.g., 1970-01-01 or 1980-01-01 artifacts
+        from Google Photos animations/collages or ZIP archives) are rejected as invalid.
+
+        Returns:
+            str: ISO date string (default '2000-01-01').
+        """
+        return self._min_valid_date
+
+    @min_valid_date.setter
+    def min_valid_date(self, value: str) -> None:
+        """
+        Set the minimum valid media date threshold.
+
+        Args:
+            value (str): Date string formatted as 'YYYY-MM-DD'.
+
+        Raises:
+            ValueError: If `value` is not a valid 'YYYY-MM-DD' date string.
+        """
+        parsed = datetime.strptime(str(value).strip(), "%Y-%m-%d")
+        self._min_valid_date = parsed.strftime("%Y-%m-%d")
+
+    @property
+    def min_valid_datetime(self) -> datetime:
+        """
+        Return `min_valid_date` parsed as a `datetime` object at 00:00:00.
+
+        Returns:
+            datetime: Minimum valid media creation datetime.
+        """
+        return datetime.strptime(self._min_valid_date, "%Y-%m-%d")
+
     def to_dict(self) -> dict:
         """
         Serialize current settings to a JSON-compatible dictionary.
@@ -163,6 +203,7 @@ class AppSettings:
             "cpu_cores_detected": self.get_cpu_count(),
             "recommended_threads": self.calculate_recommended_threads(),
             "last_selected_directory": self._last_selected_directory,
+            "min_valid_date": self._min_valid_date,
         }
 
     def load(self) -> None:
@@ -179,6 +220,11 @@ class AppSettings:
                     self.worker_threads = int(data["worker_threads"])
                 if "last_selected_directory" in data:
                     self.last_selected_directory = str(data["last_selected_directory"] or "")
+                if "min_valid_date" in data and data["min_valid_date"]:
+                    try:
+                        self.min_valid_date = str(data["min_valid_date"])
+                    except ValueError:
+                        self._min_valid_date = self.DEFAULT_MIN_VALID_DATE
                 return
             except Exception:
                 # If file is corrupted, regenerate defaults and save
@@ -186,6 +232,7 @@ class AppSettings:
 
         # First run or unreadable file: initialize defaults and persist immediately
         self._worker_threads = self.calculate_recommended_threads()
+        self._min_valid_date = self.DEFAULT_MIN_VALID_DATE
         self.save()
 
     def save(self) -> str:

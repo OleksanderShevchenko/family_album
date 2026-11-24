@@ -1,3 +1,14 @@
+"""
+Memento pattern implementation for Duplicate File Analysis and Duplicate Verification.
+
+Supports two resumable stages persisted inside `saves/save_<hash>.json`:
+1. `stage = "hashing"`: Stage 1 multithreaded Blake2b hash calculation (`ResumableDuplicateAnalyser`).
+2. `stage = "verifying"`: Stage 2 multithreaded byte-size verification of detected duplicates
+   (`ResumableDuplicatesVerifier`), preserving the full Stage 1 results (`files_hashes`,
+   `processed_files`, `files_count`, `subdirectories_count`) so verification can be paused,
+   saved, and resumed even after restarting the application on another day.
+"""
+
 import os
 import json
 import time
@@ -8,7 +19,7 @@ from typing import Dict, List, Optional, Tuple
 
 class DuplicationCheckStatus(Enum):
     """
-    Enum representing the current state of duplicate checking process.
+    Enum representing the current state of duplicate checking or verification process.
     """
     IDLE = "Idle"
     RUNNING = "Running"
@@ -16,10 +27,23 @@ class DuplicationCheckStatus(Enum):
     COMPLETED = "Completed"
 
 
+class DuplicationStage(Enum):
+    """
+    Enum identifying which stage of the duplicate workflow is active or saved in a memento.
+    """
+    HASHING = "hashing"
+    VERIFYING = "verifying"
+
+
 class DuplicationCheckMemento:
     """
     Memento pattern: Encapsulates and freezes the state of duplicate file checking
+    (Stage 1: hashing) and duplicate verification (Stage 2: size verification)
     for a location at a specific point in time.
+
+    When `stage == "verifying"`, full Stage 1 results (`files_hashes`, `processed_files`,
+    `files_count`, `subdirectories_count`) are preserved alongside Stage 2 verification
+    progress (`verified_originals`, `verified_duplicates`, `mismatched_files`).
     """
 
     def __init__(
@@ -29,7 +53,11 @@ class DuplicationCheckMemento:
         subdirectories_count: int,
         processed_files: Dict[str, str],
         files_hashes: Dict[str, List[str]],
-        timestamp: Optional[float] = None
+        timestamp: Optional[float] = None,
+        stage: str = DuplicationStage.HASHING.value,
+        verified_originals: Optional[List[str]] = None,
+        verified_duplicates: Optional[Dict[str, List[str]]] = None,
+        mismatched_files: Optional[List[dict]] = None,
     ) -> None:
         self.directory = os.path.normpath(directory)
         self.files_count = files_count
@@ -39,25 +67,49 @@ class DuplicationCheckMemento:
         self.files_hashes = {k: [os.path.normpath(f) for f in v] for k, v in files_hashes.items()}
         self.timestamp = timestamp if timestamp is not None else time.time()
 
+        # Stage 2 (Duplicate Verification) metadata
+        self.stage: str = stage if stage in (DuplicationStage.HASHING.value, DuplicationStage.VERIFYING.value) else DuplicationStage.HASHING.value
+        self.verified_originals: List[str] = [os.path.normpath(p) for p in (verified_originals or [])]
+        self.verified_duplicates: Dict[str, List[str]] = {
+            os.path.normpath(orig): [os.path.normpath(d) for d in dups]
+            for orig, dups in (verified_duplicates or {}).items()
+        }
+        self.mismatched_files: List[dict] = list(mismatched_files or [])
+
+    @property
+    def candidate_duplicate_groups_count(self) -> int:
+        """Return total number of candidate duplicate groups derived from Stage 1 hashes."""
+        return sum(1 for paths in self.files_hashes.values() if len(paths) > 1)
+
     def to_dict(self) -> dict:
+        """Serialize memento state (both Stage 1 and Stage 2) to a JSON-compatible dictionary."""
         return {
             "directory": self.directory,
             "files_count": self.files_count,
             "subdirectories_count": self.subdirectories_count,
             "processed_files": self.processed_files,
             "files_hashes": self.files_hashes,
-            "timestamp": self.timestamp
+            "timestamp": self.timestamp,
+            "stage": self.stage,
+            "verified_originals": self.verified_originals,
+            "verified_duplicates": self.verified_duplicates,
+            "mismatched_files": self.mismatched_files,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "DuplicationCheckMemento":
+        """Reconstruct a DuplicationCheckMemento from a dictionary (backwards-compatible)."""
         return cls(
             directory=data["directory"],
             files_count=data["files_count"],
             subdirectories_count=data["subdirectories_count"],
             processed_files=data.get("processed_files", {}),
             files_hashes=data.get("files_hashes", {}),
-            timestamp=data.get("timestamp", 0.0)
+            timestamp=data.get("timestamp", 0.0),
+            stage=data.get("stage", DuplicationStage.HASHING.value),
+            verified_originals=data.get("verified_originals", []),
+            verified_duplicates=data.get("verified_duplicates", {}),
+            mismatched_files=data.get("mismatched_files", []),
         )
 
 

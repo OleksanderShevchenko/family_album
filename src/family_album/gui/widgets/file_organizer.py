@@ -522,7 +522,7 @@ class FileOrganizer(QtWidgets.QWidget, Ui_Form):
             "filename": "Filename (Name)",
             "exif": "EXIF Metadata",
             "video_metadata": "Video Metadata",
-            "filesystem": "File System",
+            "filesystem": "File System (Last Modified)",
             "none": "None (No_Date)",
         }
 

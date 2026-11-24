@@ -61,16 +61,16 @@ We have introduced a feature to organize family photos and videos into a structu
 - [x] Enable OS filesystem timestamp fallback (`extract_date_from_filesystem` using earliest valid `st_mtime`/`st_ctime`/`st_birthtime`, rejecting pre-`min_valid_date` `st_mtime` placeholders) in `FileOrganizerEngine._inspect_single_file()` as Priority #3 before routing to `No_Date/`.
 - [x] Add unit tests in `test_app_settings.py`, `test_date_extractor.py`, and `test_file_organizer_engine.py` with generated JPEG (bogus 1970/1980 EXIF + valid Last Modified) and generated AVI video (63 passed).
 
-### Step 6: Multithreaded Resumable Duplicate Verification (`ResumableDuplicatesVerifier`) — `[NEXT]`
-- [ ] Create `src/family_album_lib/resumable_duplicates_verifier.py` (`ResumableDuplicatesVerifier`), modeled after `ResumableDuplicateAnalyser`:
+### Step 6: Multithreaded Resumable Duplicate Verification (`ResumableDuplicatesVerifier`) — `[COMPLETED]`
+- [x] Created `src/family_album_lib/resumable_duplicates_verifier.py` (`ResumableDuplicatesVerifier`), modeled after `ResumableDuplicateAnalyser`:
   - Uses `ThreadPoolExecutor(max_workers=AppSettings.worker_threads)` to verify only detected duplicate groups (comparing exact byte sizes of original vs. candidate duplicates).
   - Supports cooperative pause/stop, progress/log callbacks, and Memento state save/restore so verification can be resumed even after restarting the app on another day.
   - Excludes any size mismatches into `mismatched_files` with `WARNING` logs to protect against hash collisions.
-- [ ] Extend `DuplicationCheckMemento` (`duplication_memento.py`) with a `stage` field (`"hashing"` default for backward compatibility, or `"verifying"`), preserving full Stage 1 results (`files_hashes`, `processed_files`, `files_count`, `subdirectories_count`) alongside Stage 2 verification checkpoint fields (`verified_duplicates`, `verified_originals`, `mismatched_files`) so resuming after an app restart retains all Stage 1 data without re-hashing.
-- [ ] Add a single new **`Verify Duplicates`** button to `DuplicationChecker` (`duplication_checker.py`); reuse existing `Stop / Pause`, `Save State`, and `Resume Check` buttons by dispatching internally based on the active/saved stage (`hashing` vs `verifying`).
-- [ ] Add unit tests in `tests/test_duplicates_verifier.py` covering multithreaded size verification, simulated hash collisions, and pause/save/resume across sessions.
+- [x] Extended `DuplicationCheckMemento` (`duplication_memento.py`) with `DuplicationStage` and a `stage` field (`"hashing"` default for backward compatibility, or `"verifying"`), preserving full Stage 1 results (`files_hashes`, `processed_files`, `files_count`, `subdirectories_count`) alongside Stage 2 verification checkpoint fields (`verified_duplicates`, `verified_originals`, `mismatched_files`) so resuming after an app restart retains all Stage 1 data without re-hashing.
+- [x] Added a single new **`Verify Duplicates`** button to `DuplicationChecker` (`duplication_checker.py`); reused existing `Stop / Pause`, `Save State`, and `Resume Check` buttons by dispatching internally based on the active/saved stage (`hashing` vs `verifying`).
+- [x] Added 6 unit & GUI integration tests in `tests/test_duplicates_verifier.py` covering multithreaded size verification, simulated hash collisions, and pause/save/resume across sessions (69 passed total).
 
-### Step 7: Final Polish & Repository Hygiene — `[PENDING]`
+### Step 7: Final Polish & Repository Hygiene — `[NEXT]`
 - [ ] Use `is_valid_database()` and invoke `verify_catalog_actuality()` during Self-Organization with log/status summary.
 - [ ] Update `docs/organizer_diagram.md` and `README.md`.
 - [ ] Remove unused `src/family_album/gui/dataframe_model.py` and add `saves/`, `tests/saves/`, `*.db` to `.gitignore`.

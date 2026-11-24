@@ -150,28 +150,28 @@ flowchart TD
 
 ---
 
-### Крок 6: Багатопотокова верифікація дублікатів із паузою/збереженням (`ResumableDuplicatesVerifier`) — `[НАСТУПНИЙ КРОК]`
+### Крок 6: Багатопотокова верифікація дублікатів із паузою/збереженням (`ResumableDuplicatesVerifier`) — `[ВИКОНАНО]`
 **Мета**: Додати окремий 2-й етап перевірки **виключно для знайдених дублікатів** (порівняння точного розміру файлу оригіналу та його дублікатів у багатопотоковому режимі), який можна зупинити, зберегти у Memento та продовжити навіть після перезапуску застосунку на наступний день.
-- [ ] **6.1. Новий клас `ResumableDuplicatesVerifier` (`src/family_album_lib/resumable_duplicates_verifier.py`)**:
-  - Побудований за аналогією з `ResumableDuplicateAnalyser` (`ThreadPoolExecutor(max_workers=AppSettings.worker_threads)`, `Event` для кооперативної паузи, статус `DuplicationCheckStatus`, колбеки `start_analysis`, `update_analysis`, `log_event`, `finish_analysis`).
+- [x] **6.1. Новий клас `ResumableDuplicatesVerifier` ([resumable_duplicates_verifier.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album_lib/resumable_duplicates_verifier.py))**:
+  - Побудовано за аналогією з `ResumableDuplicateAnalyser` (`ThreadPoolExecutor(max_workers=AppSettings.worker_threads)`, `Event` для кооперативної паузи, статус `DuplicationCheckStatus`, колбеки `start_verification`, `update_progress`, `log_event`, `finish_verification`).
   - Працює тільки над групами дублікатів (`{original: [dup1, dup2, ...]}`), порівнюючи точний розмір файлу в байтах (`os.path.getsize`) оригіналу та кожного кандидата-дубліката.
-  - Пропускає вже перевірені групи при відновленні (`verified_groups`), відсіює файли з розбіжністю розміру у `mismatched_files` (із попередженням `WARNING` у лог) та формує очищений словник підтверджених дублікатів `verified_duplicates`.
+  - Пропускає вже перевірені групи при відновленні (`verified_originals`), відсіює файли з розбіжністю розміру у `mismatched_files` (із попередженням `WARNING` у лог) та формує очищений словник підтверджених дублікатів `verified_duplicates`.
   - Підтримує `create_memento()` та `restore_memento()` для повної інтеграції з `DuplicationSaveManager`.
-- [ ] **6.2. Розширення `DuplicationCheckMemento` (`src/family_album_lib/duplication_memento.py`)**:
-  - Додати поле `stage` (`"hashing"` за замовчуванням для зворотної сумісності зі старими сейвами або `"verifying"` для 2-го етапу).
-  - **Обов'язково зберігати повний результат 1-го етапу** (`files_hashes`, `processed_files`, `files_count`, `subdirectories_count`) разом із прогресом 2-го етапу, щоб після перезапуску програми не доводилося перераховувати хеші та залишалися доступними `Dump`, аналіз дублікатів папок і повний перелік кандидатів для продовження верифікації.
-  - Додати поля стану верифікації: `verified_duplicates` (`Dict[str, List[str]]`), `verified_originals` (`List[str]`), `mismatched_files` (`List[dict]`).
-  - Забезпечити коректну верифікацію локації (`verify_location`) для обох етапів.
-- [ ] **6.3. Оновлення GUI у [duplication_checker.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/gui/widgets/duplication_checker.py)**:
-  - Додати на панель **лише одну нову кнопку**: **`Verify Duplicates`** (`pbVerifyDuplicates`), активну після завершення пошуку дублікатів.
+- [x] **6.2. Розширення `DuplicationCheckMemento` ([duplication_memento.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album_lib/duplication_memento.py))**:
+  - Додано `DuplicationStage` (`HASHING = "hashing"`, `VERIFYING = "verifying"`) та поле `stage` (`"hashing"` за замовчуванням для зворотної сумісності зі старими сейвами).
+  - **Збережено повний результат 1-го етапу** (`files_hashes`, `processed_files`, `files_count`, `subdirectories_count`) разом із прогресом 2-го етапу, щоб після перезапуску програми не доводилося перераховувати хеші та залишалися доступними `Dump`, `Move`, аналіз дублікатів папок і повний перелік кандидатів для продовження верифікації.
+  - Додано поля стану верифікації: `verified_duplicates` (`Dict[str, List[str]]`), `verified_originals` (`List[str]`), `mismatched_files` (`List[dict]`) та властивість `candidate_duplicate_groups_count`.
+  - Забезпечено коректну верифікацію локації (`verify_location`) для обох етапів.
+- [x] **6.3. Оновлення GUI у [duplication_checker.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/gui/widgets/duplication_checker.py)**:
+  - Додано на панель **лише одну нову кнопку**: **`Verify Duplicates`** (`pbVerifyDuplicates`), активну після завершення пошуку дублікатів.
   - Існуючі кнопки **`Stop / Pause`**, **`Save State`**, **`Resume Check`** автоматично працюють із поточним активним етапом (`_active_stage`: `"hashing"` або `"verifying"`), визначаючи його за станом віджета або полем `memento.stage` після перезапуску програми.
-  - Після завершення верифікації оновлювати списки дублікатів підтвердженими даними та виводити підсумок верифікації у `_log_detailed_summary()`.
-- [ ] **6.4. Тестування Кроку 6**:
-  - Написати модульні тести `tests/test_duplicates_verifier.py` (багатопотокова верифікація розмірів, виявлення імітованої хеш-колізії з іншим розміром файлу, еквівалентність односесійної та багатосесійної верифікації з паузою/збереженням/перезапуском через `stage="verifying"`).
+  - Після завершення верифікації оновлюються списки дублікатів підтвердженими даними, зберігається `files_hash` з 1-го етапу та виводиться детальний підсумок верифікації (`_log_verification_summary()`).
+- [x] **6.4. Тестування Кроку 6**:
+  - Написано модульні та GUI-тести [test_duplicates_verifier.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/tests/test_duplicates_verifier.py) (багатопотокова верифікація розмірів, виявлення імітованої хеш-колізії з іншим розміром файлу, пауза/збереження/відновлення через `stage="verifying"` зі збереженням 1-го етапу, інтеграція `DuplicationChecker`) — **69/69 тестів проходять**.
 
 ---
 
-### Крок 7: Фінальне полірування перед злиттям гілки — `[ЗАПЛАНОВАНО]`
+### Крок 7: Фінальне полірування перед злиттям гілки — `[НАСТУПНИЙ КРОК]`
 - [ ] **7.1. Самоорганізація**: замінити `has_database()` на `is_valid_database()` та запускати `verify_catalog_actuality()` у режимі Self-Organization із виведенням звіту в лог/статус.
 - [ ] **7.2. Документація**: оновити [docs/organizer_diagram.md](file:///C:/Users/Oleksander/Alex/Projects/family_album/docs/organizer_diagram.md) та [README.md](file:///C:/Users/Oleksander/Alex/Projects/family_album/README.md).
 - [ ] **7.3. Гігієна репозиторію**: видалити мертвий [dataframe_model.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/gui/dataframe_model.py) та додати `saves/`, `tests/saves/`, `*.db` у [.gitignore](file:///C:/Users/Oleksander/Alex/Projects/family_album/.gitignore).

@@ -150,18 +150,26 @@ class MainWindow(QMainWindow, Ui_FamilyAlbumUI):
 
         Propagates updated worker thread count and startup directory to active tools.
         """
+        prev_min_date = self._settings.min_valid_date
         dialog = SettingsDialog(self._settings, self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             threads = self._settings.worker_threads
             self.duplication_checker.max_workers = threads
             self.file_organizer.max_workers = threads
 
+            if self._settings.min_valid_date != prev_min_date:
+                # Invalidate cached preview plan so organizer re-evaluates dates against the new threshold
+                self.file_organizer._plan_context = None
+
             new_dir = self._settings.last_selected_directory
             if new_dir and os.path.isdir(new_dir) and new_dir != self.duplication_checker.selected_path:
                 self.dir_viewer.select_directory(new_dir)
                 self.evt_dir_selected(new_dir)
 
-            msg = f"Settings updated: worker threads = {threads}."
+            msg = (
+                f"Settings updated: worker threads = {threads}, "
+                f"min valid date = {self._settings.min_valid_date}."
+            )
             self.statusBar().showMessage(msg, self._interval)
             self._logger.log_info(msg)
 

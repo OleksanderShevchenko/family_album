@@ -11,8 +11,9 @@ import os
 from typing import Optional
 
 from PyQt6 import QtCore
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtWidgets import (
+    QDateEdit,
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -106,7 +107,54 @@ class SettingsDialog(QDialog):
 
         main_layout.addWidget(self.gb_threading)
 
-        # 2. Startup & Workspace Directory Group
+        # 2. Media Date Validation Group
+        self.gb_date_validation = QGroupBox("Media Date Validation (File Organizer)", self)
+        date_layout = QVBoxLayout(self.gb_date_validation)
+        date_layout.setSpacing(8)
+
+        date_row = QHBoxLayout()
+        lbl_min_date = QLabel("Minimum Valid Date:", self.gb_date_validation)
+        date_row.addWidget(lbl_min_date)
+
+        self.de_min_valid_date = QDateEdit(self.gb_date_validation)
+        self.de_min_valid_date.setCalendarPopup(True)
+        self.de_min_valid_date.setDisplayFormat("yyyy-MM-dd")
+        self.de_min_valid_date.setMinimumDate(QDate(1900, 1, 1))
+        self.de_min_valid_date.setMaximumDate(QDate.currentDate())
+        parsed_qdate = QDate.fromString(self._settings.min_valid_date, "yyyy-MM-dd")
+        if not parsed_qdate.isValid():
+            parsed_qdate = QDate.fromString(AppSettings.DEFAULT_MIN_VALID_DATE, "yyyy-MM-dd")
+        self.de_min_valid_date.setDate(parsed_qdate)
+        self.de_min_valid_date.setFixedWidth(130)
+        self.de_min_valid_date.setToolTip(
+            "Dates earlier than this threshold (e.g., 1970 or 1980 placeholder epochs) will be ignored"
+        )
+        date_row.addWidget(self.de_min_valid_date)
+
+        self.pb_reset_min_date = QPushButton(
+            f"Reset ({AppSettings.DEFAULT_MIN_VALID_DATE})",
+            self.gb_date_validation,
+        )
+        self.pb_reset_min_date.setToolTip(
+            f"Reset minimum valid date to default ({AppSettings.DEFAULT_MIN_VALID_DATE})"
+        )
+        date_row.addWidget(self.pb_reset_min_date)
+        date_row.addStretch()
+
+        date_layout.addLayout(date_row)
+
+        lbl_date_hint = QLabel(
+            "Rejects bogus placeholder dates (such as 1970-01-01 or 1980-01-01 from Google Photos "
+            "animations/collages or ZIP archives) when determining the earliest capture date.",
+            self.gb_date_validation,
+        )
+        lbl_date_hint.setWordWrap(True)
+        lbl_date_hint.setStyleSheet("color: #666666; font-size: 11px;")
+        date_layout.addWidget(lbl_date_hint)
+
+        main_layout.addWidget(self.gb_date_validation)
+
+        # 3. Startup & Workspace Directory Group
         self.gb_workspace = QGroupBox("Workspace & Session Persistence", self)
         workspace_layout = QVBoxLayout(self.gb_workspace)
         workspace_layout.setSpacing(8)
@@ -159,6 +207,8 @@ class SettingsDialog(QDialog):
         self.sb_worker_threads.valueChanged.connect(self.sl_worker_threads.setValue)
         self.sl_worker_threads.valueChanged.connect(self.sb_worker_threads.setValue)
         self.pb_reset_threads.clicked.connect(lambda: self.sb_worker_threads.setValue(recommended))
+        default_qdate = QDate.fromString(AppSettings.DEFAULT_MIN_VALID_DATE, "yyyy-MM-dd")
+        self.pb_reset_min_date.clicked.connect(lambda: self.de_min_valid_date.setDate(default_qdate))
         self.pb_browse_dir.clicked.connect(self._evt_browse_dir)
         self.pb_clear_dir.clicked.connect(lambda: self.le_last_directory.setText(""))
         self.pb_save.clicked.connect(self._evt_save)
@@ -178,6 +228,7 @@ class SettingsDialog(QDialog):
     def _evt_save(self) -> None:
         """Apply changes to AppSettings, persist to disk, and close dialog."""
         self._settings.worker_threads = self.sb_worker_threads.value()
+        self._settings.min_valid_date = self.de_min_valid_date.date().toString("yyyy-MM-dd")
         raw_dir = self.le_last_directory.text().strip()
         self._settings.last_selected_directory = raw_dir if raw_dir else ""
         self._settings.save()

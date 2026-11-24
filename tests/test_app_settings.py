@@ -3,12 +3,14 @@ Unit tests for AppSettings (.settings/settings.json), SettingsDialog, and
 thread count propagation to DuplicationChecker and FileOrganizer.
 """
 
+from datetime import datetime
 import json
 import os
 import shutil
 import tempfile
 import unittest
 
+from PyQt6.QtCore import QDate
 from PyQt6.QtWidgets import QApplication
 
 from src.family_album.gui.dialogs.settings_dialog import SettingsDialog
@@ -44,24 +46,33 @@ class TestAppSettings(unittest.TestCase):
         expected_threads = max(1, min(256, (os.cpu_count() or 4) * 2))
         self.assertEqual(settings.worker_threads, expected_threads)
         self.assertEqual(settings.last_selected_directory, "")
+        self.assertEqual(settings.min_valid_date, "2000-01-01")
+        self.assertEqual(settings.min_valid_datetime, datetime(2000, 1, 1, 0, 0, 0))
 
         with open(expected_path, "r", encoding="utf-8") as f:
             saved_data = json.load(f)
         self.assertEqual(saved_data["worker_threads"], expected_threads)
+        self.assertEqual(saved_data["min_valid_date"], "2000-01-01")
 
     def test_save_and_reload_settings(self):
-        """Modified worker_threads and last_selected_directory persist across reloads."""
+        """Modified worker_threads, min_valid_date, and last_selected_directory persist across reloads."""
         settings1 = AppSettings(app_dir=self.temp_dir)
         sample_dir = os.path.join(self.temp_dir, "my_photos")
         os.makedirs(sample_dir, exist_ok=True)
 
         settings1.worker_threads = 12
+        settings1.min_valid_date = "1998-06-15"
         settings1.last_selected_directory = sample_dir
         settings1.save()
 
         settings2 = AppSettings(app_dir=self.temp_dir)
         self.assertEqual(settings2.worker_threads, 12)
+        self.assertEqual(settings2.min_valid_date, "1998-06-15")
+        self.assertEqual(settings2.min_valid_datetime, datetime(1998, 6, 15, 0, 0, 0))
         self.assertEqual(settings2.last_selected_directory, os.path.normpath(sample_dir))
+
+        with self.assertRaises(ValueError):
+            settings2.min_valid_date = "not-a-date"
 
     def test_worker_threads_clamping(self):
         """worker_threads is clamped between MIN_THREADS (1) and MAX_THREADS (256)."""
@@ -86,12 +97,19 @@ class TestAppSettings(unittest.TestCase):
         self.assertEqual(dialog.sb_worker_threads.value(), 8)
 
         # Saving applies changes to settings and writes to disk
+        dialog.de_min_valid_date.setDate(QDate(2002, 5, 1))
         dialog.le_last_directory.setText(self.temp_dir)
         dialog._evt_save()
 
         reloaded = AppSettings(app_dir=self.temp_dir)
         self.assertEqual(reloaded.worker_threads, 8)
+        self.assertEqual(reloaded.min_valid_date, "2002-05-01")
         self.assertEqual(reloaded.last_selected_directory, os.path.normpath(self.temp_dir))
+
+        # Reset button restores default 2000-01-01
+        dialog2 = SettingsDialog(settings=reloaded)
+        dialog2.pb_reset_min_date.click()
+        self.assertEqual(dialog2.de_min_valid_date.date().toString("yyyy-MM-dd"), AppSettings.DEFAULT_MIN_VALID_DATE)
 
     def test_both_tools_respect_configured_worker_threads(self):
         """Both DuplicationChecker/ResumableDuplicateAnalyser and FileOrganizer/OrganizerWorker use worker_threads."""

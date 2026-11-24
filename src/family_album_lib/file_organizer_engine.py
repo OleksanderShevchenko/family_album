@@ -31,6 +31,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from src.family_album.utility_functions.date_extractor import (
     extract_date_from_exif,
     extract_date_from_filename,
+    extract_date_from_filesystem,
     extract_date_from_pil_exif,
     extract_date_from_video,
     MediaDateResult,
@@ -421,28 +422,32 @@ class FileOrganizerEngine:
         target_abs: str,
         action_type: str,
         prefer_filename: bool = True,
+        min_date: Optional[datetime] = None,
     ) -> OrganizePlanItem:
         """
         Inspect a single candidate file in one optimized pass (designed to run inside
         a `ThreadPoolExecutor` worker thread).
 
-        Optimization strategy:
-        - Filename regex parsing runs first in memory (zero disk I/O).
-        - For images: opens Pillow header **once** to obtain `size` (resolution),
-          `Make` (tag 271), and EXIF Sub-IFD capture date (if not already found in filename).
-        - For videos: obtains resolution via fast OpenCV (`get_video_resolution_fast`) and
-          only calls MoviePy (`extract_date_from_video`) if no date was found in the filename.
-        - Non-media files bypass Pillow/OpenCV/MoviePy completely.
+        Date resolution priority (all dates validated against `min_date` / `AppSettings.min_valid_date`):
+        1. Filename pattern parsing (zero disk I/O).
+        2. Embedded media metadata (single-pass Pillow EXIF Sub-IFD for images;
+           container `creation_time` for videos only when filename lacked a date).
+        3. Operating system filesystem timestamps (`extract_date_from_filesystem`:
+           earliest valid `Last Modified` / `Created`, rejecting 1970/1980 epochs).
+        4. Unresolved (`No_Date/`) when no valid date >= `min_date` exists.
 
         Args:
             full_path (str): Absolute path to the candidate file.
             target_abs (str): Absolute destination root directory.
             action_type (str): Planned transfer method ('copy' or 'move').
             prefer_filename (bool): Whether filename date parsing takes priority.
+            min_date (Optional[datetime]): Optional lower bound override for valid dates
+                (defaults to `AppSettings.instance().min_valid_datetime`).
 
         Returns:
             OrganizePlanItem: Constructed plan item for the file.
         """
+        effective_min_date = min_date if min_date is not None else AppSettings.instance().min_valid_datetime
         fname = os.path.basename(full_path)
         try:
             fsize = os.path.getsize(full_path)
@@ -453,7 +458,7 @@ class FileOrganizerEngine:
 
         # 1. Priority 1: Filename date parsing (zero disk I/O)
         if prefer_filename:
-            fn_date = extract_date_from_filename(fname)
+            fn_date = extract_date_from_filename(fname, min_date=effective_min_date)
             if fn_date:
                 date_res = MediaDateResult(
                     date=fn_date,
@@ -475,7 +480,7 @@ class FileOrganizerEngine:
             if is_vid:
                 resolution = get_video_resolution_fast(full_path)
                 if date_res is None:
-                    v_date = extract_date_from_video(full_path)
+                    v_date = extract_date_from_video(full_path, min_date=effective_min_date)
                     if v_date:
                         date_res = MediaDateResult(
                             date=v_date,
@@ -497,7 +502,7 @@ class FileOrganizerEngine:
                             if 271 in exif:
                                 maker = str(exif[271]).strip()
                             if date_res is None:
-                                pil_dt = extract_date_from_pil_exif(exif)
+                                pil_dt = extract_date_from_pil_exif(exif, min_date=effective_min_date)
                                 if pil_dt:
                                     date_res = MediaDateResult(
                                         date=pil_dt,
@@ -513,7 +518,7 @@ class FileOrganizerEngine:
 
             # Only invoke lightweight exifread fallback if Pillow did not find an EXIF date
             if is_img and date_res is None:
-                exif_dt = extract_date_from_exif(full_path)
+                exif_dt = extract_date_from_exif(full_path, min_date=effective_min_date)
                 if exif_dt:
                     date_res = MediaDateResult(
                         date=exif_dt,
@@ -523,7 +528,7 @@ class FileOrganizerEngine:
 
         # 3. Filename fallback if prefer_filename was False
         if not prefer_filename and date_res is None:
-            fn_date = extract_date_from_filename(fname)
+            fn_date = extract_date_from_filename(fname, min_date=effective_min_date)
             if fn_date:
                 date_res = MediaDateResult(
                     date=fn_date,
@@ -531,12 +536,22 @@ class FileOrganizerEngine:
                     detail=f"Extracted from name: {fname}",
                 )
 
-        # 4. Unresolved date -> No_Date
+        # 4. Priority 3: Operating System Filesystem Fallback (Last Modified / Created)
+        if date_res is None:
+            fs_date = extract_date_from_filesystem(full_path, min_date=effective_min_date)
+            if fs_date:
+                date_res = MediaDateResult(
+                    date=fs_date,
+                    source="filesystem",
+                    detail="Extracted from file system (Last Modified)",
+                )
+
+        # 5. Unresolved date -> No_Date
         if date_res is None:
             date_res = MediaDateResult(
                 date=None,
                 source="none",
-                detail="No creation date found in filename or metadata",
+                detail="No valid creation date found in filename, metadata, or filesystem",
             )
 
         if date_res.has_date:

@@ -12,11 +12,11 @@ We have introduced a feature to organize family photos and videos into a structu
 - [x] **Conflict Resolution & Safety Invariant (`file_organizer_engine.py`)**: Never deletes or overwrites user files; disambiguates collisions with `_copyN` suffixes and compares Blake2b hashes.
 - [x] **Core GUI Layout (`file_organizer.py` & `file_organizer_ui.py`)**: Source/Target folder pickers, New Organization vs Self-Organization modes, Copy vs Move radio controls, preview table, and enabled tab in `MainWindow`.
 
-### 1.2. Needs Refactoring / Optimization (`[TO REFACTOR]`)
-- [ ] **Eliminate `VideoFileClip` (`ffmpeg`) invocation on non-video files in `video_utils.is_file_a_video()`**: Avoid spawning OS subprocesses for `.jpg`/`.png` files; add `get_video_resolution_fast()` via OpenCV and ensure `cap.release()` / `clip.close()` in `finally` blocks.
-- [ ] **Single-pass Image Metadata Inspection (`image_utils.py`, `date_extractor.py`)**: Replace 5–7 repeated file opens per photo with single-pass Pillow header inspection (`inspect_image_fast`) and direct Pillow EXIF Sub-IFD (`0x8769`) parsing.
-- [ ] **Parallelize Single-Threaded Loops in `FileOrganizerEngine`**: Replace sequential loops in `scan_and_plan()` and `execute_plan()` with `ThreadPoolExecutor(max_workers=...)` and reuse already-analyzed plans.
-- [ ] **Replace Hardcoded 200 Threads in `ResumableDuplicateAnalyser`**: Read `worker_threads` dynamically from `AppSettings`.
+### 1.2. Refactored & Optimized (`[COMPLETED]`)
+- [x] **Eliminate `VideoFileClip` (`ffmpeg`) invocation on non-video files in `video_utils.is_file_a_video()`**: Avoid spawning OS subprocesses for `.jpg`/`.png` files; add `get_video_resolution_fast()` via OpenCV and ensure `cap.release()` / `clip.close()` in `finally` blocks.
+- [x] **Single-pass Image Metadata Inspection (`image_utils.py`, `date_extractor.py`)**: Replace 5–7 repeated file opens per photo with single-pass Pillow header inspection (`inspect_image_fast`) and direct Pillow EXIF Sub-IFD (`0x8769`) parsing.
+- [x] **Parallelize Single-Threaded Loops in `FileOrganizerEngine`**: Replace sequential loops in `scan_and_plan()` and `execute_plan()` with `ThreadPoolExecutor(max_workers=...)` and reuse already-analyzed plans.
+- [x] **Replace Hardcoded 200 Threads in `ResumableDuplicateAnalyser`**: Read `worker_threads` dynamically from `AppSettings`.
 
 ---
 
@@ -54,6 +54,26 @@ We have introduced a feature to organize family photos and videos into a structu
 - [x] Add `to_dict()` / `from_dict()` serialization to `MediaDateResult`, `OrganizePlanItem`, and `OrganizeStats`; add resumable `existing_items`, `initial_stats`, and `paused` signal to `FileOrganizerEngine` / `OrganizerWorker`.
 - [x] Add `Save State` and `Resume` buttons to `FileOrganizer` widget and support pausing/saving/resuming from the exact checkpoint for both analysis and organization.
 - [x] Add 5 unit tests in `tests/test_organizer_memento.py` (59 passed total).
+
+### Step 5: Configurable Minimum Valid Date (`2000-01-01`) & Filesystem `Last Modified` Fallback — `[NEXT]`
+- [ ] Add `min_valid_date` (`"2000-01-01"` default) to `AppSettings` (`.settings/settings.json`) and a `QDateEdit` selector + reset button to `SettingsDialog` (`Tools -> Settings...`).
+- [ ] Enforce `min_valid_date` across all date sources in `date_extractor.py` to reject bogus `1970`/`1980` epoch dates from Google Photos animations/collages and ZIP archives.
+- [ ] Enable OS filesystem timestamp fallback (`extract_date_from_filesystem` using earliest valid `st_mtime`/`st_ctime`/`st_birthtime`) in `FileOrganizerEngine._inspect_single_file()` as Priority #3 before routing to `No_Date/`.
+- [ ] Add unit tests in `test_app_settings.py`, `test_date_extractor.py`, and `test_file_organizer_engine.py`.
+
+### Step 6: Multithreaded Resumable Duplicate Verification (`ResumableDuplicatesVerifier`) — `[PENDING]`
+- [ ] Create `src/family_album_lib/resumable_duplicates_verifier.py` (`ResumableDuplicatesVerifier`), modeled after `ResumableDuplicateAnalyser`:
+  - Uses `ThreadPoolExecutor(max_workers=AppSettings.worker_threads)` to verify only detected duplicate groups (comparing exact byte sizes of original vs. candidate duplicates).
+  - Supports cooperative pause/stop, progress/log callbacks, and Memento state save/restore so verification can be resumed even after restarting the app on another day.
+  - Excludes any size mismatches into `mismatched_files` with `WARNING` logs to protect against hash collisions.
+- [ ] Extend `DuplicationCheckMemento` (`duplication_memento.py`) with a `stage` field (`"hashing"` default for backward compatibility, or `"verifying"`), preserving full Stage 1 results (`files_hashes`, `processed_files`, `files_count`, `subdirectories_count`) alongside Stage 2 verification checkpoint fields (`verified_duplicates`, `verified_originals`, `mismatched_files`) so resuming after an app restart retains all Stage 1 data without re-hashing.
+- [ ] Add a single new **`Verify Duplicates`** button to `DuplicationChecker` (`duplication_checker.py`); reuse existing `Stop / Pause`, `Save State`, and `Resume Check` buttons by dispatching internally based on the active/saved stage (`hashing` vs `verifying`).
+- [ ] Add unit tests in `tests/test_duplicates_verifier.py` covering multithreaded size verification, simulated hash collisions, and pause/save/resume across sessions.
+
+### Step 7: Final Polish & Repository Hygiene — `[PENDING]`
+- [ ] Use `is_valid_database()` and invoke `verify_catalog_actuality()` during Self-Organization with log/status summary.
+- [ ] Update `docs/organizer_diagram.md` and `README.md`.
+- [ ] Remove unused `src/family_album/gui/dataframe_model.py` and add `saves/`, `tests/saves/`, `*.db` to `.gitignore`.
 
 ---
 

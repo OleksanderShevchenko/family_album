@@ -132,5 +132,51 @@ flowchart TD
 
 ---
 
+### Крок 5: Мінімальна валідна дата (`2000-01-01`) у налаштуваннях + Fallback на `Last Modified` файлу — `[ПОТОЧНИЙ КРОК]`
+**Проблема (виявлена на реальному домашньому архіві)**:
+1. Занадто багато файлів без EXIF і без дати в імені потрапляли до `No_Date/`, хоча у властивостях файлу (`Last Modified`) була валідна дата.
+2. Згенеровані анімації та колажі з Google Photos містили фіктивні епохові дати `1970-01-01` та `1980-01-01`, які при виборі найранішої дати перебивали реальну дату файлу.
+
+**Завдання**:
+- [ ] **5.1. Мінімальна валідна дата в `AppSettings` та `SettingsDialog`**:
+  - Додати поле `min_valid_date` (ISO `"YYYY-MM-DD"`, за замовчуванням `"2000-01-01"`) та властивість `min_valid_datetime` у [app_settings.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album_lib/app_settings.py).
+  - Додати `QDateEdit` (із календарем та кнопкою `Reset (2000-01-01)`) у [settings_dialog.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/gui/dialogs/settings_dialog.py) (`Tools -> Settings...`).
+- [ ] **5.2. Фільтрація дат за `min_valid_date` та Fallback на системні дати файлу (`os.stat`)**:
+  - Оновити `is_valid_date()` у [date_extractor.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/utility_functions/date_extractor.py), щоб відсіювати будь-які дати `< min_valid_date` (відкидає `1970` і `1980` роки).
+  - Додати функцію `extract_date_from_filesystem(file_path, min_date)` (бере найранішу валідну дату серед `st_mtime`, `st_ctime`, `st_birthtime`, яка задовольняє `min_valid_date <= dt <= now + 1 рік`).
+  - Підключити filesystem fallback як Пріоритет №3 у `FileOrganizerEngine._inspect_single_file()` (`Filename` $\rightarrow$ `EXIF / Video` $\rightarrow$ `File System (Last Modified)` $\rightarrow$ `No_Date/`).
+- [ ] **5.3. Тестування Кроку 5**:
+  - Тести у `test_app_settings.py`, `test_date_extractor.py` (фільтрація `1970`/`1980` Google Photos артефактів, збереження `min_valid_date`) та `test_file_organizer_engine.py` (маршрутизація за `Last Modified` та `No_Date/` лише для невалідних дат).
+
+---
+
+### Крок 6: Багатопотокова верифікація дублікатів із паузою/збереженням (`ResumableDuplicatesVerifier`) — `[НАСТУПНИЙ КРОК]`
+**Мета**: Додати окремий 2-й етап перевірки **виключно для знайдених дублікатів** (порівняння точного розміру файлу оригіналу та його дублікатів у багатопотоковому режимі), який можна зупинити, зберегти у Memento та продовжити навіть після перезапуску застосунку на наступний день.
+- [ ] **6.1. Новий клас `ResumableDuplicatesVerifier` (`src/family_album_lib/resumable_duplicates_verifier.py`)**:
+  - Побудований за аналогією з `ResumableDuplicateAnalyser` (`ThreadPoolExecutor(max_workers=AppSettings.worker_threads)`, `Event` для кооперативної паузи, статус `DuplicationCheckStatus`, колбеки `start_analysis`, `update_analysis`, `log_event`, `finish_analysis`).
+  - Працює тільки над групами дублікатів (`{original: [dup1, dup2, ...]}`), порівнюючи точний розмір файлу в байтах (`os.path.getsize`) оригіналу та кожного кандидата-дубліката.
+  - Пропускає вже перевірені групи при відновленні (`verified_groups`), відсіює файли з розбіжністю розміру у `mismatched_files` (із попередженням `WARNING` у лог) та формує очищений словник підтверджених дублікатів `verified_duplicates`.
+  - Підтримує `create_memento()` та `restore_memento()` для повної інтеграції з `DuplicationSaveManager`.
+- [ ] **6.2. Розширення `DuplicationCheckMemento` (`src/family_album_lib/duplication_memento.py`)**:
+  - Додати поле `stage` (`"hashing"` за замовчуванням для зворотної сумісності зі старими сейвами або `"verifying"` для 2-го етапу).
+  - **Обов'язково зберігати повний результат 1-го етапу** (`files_hashes`, `processed_files`, `files_count`, `subdirectories_count`) разом із прогресом 2-го етапу, щоб після перезапуску програми не доводилося перераховувати хеші та залишалися доступними `Dump`, аналіз дублікатів папок і повний перелік кандидатів для продовження верифікації.
+  - Додати поля стану верифікації: `verified_duplicates` (`Dict[str, List[str]]`), `verified_originals` (`List[str]`), `mismatched_files` (`List[dict]`).
+  - Забезпечити коректну верифікацію локації (`verify_location`) для обох етапів.
+- [ ] **6.3. Оновлення GUI у [duplication_checker.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/gui/widgets/duplication_checker.py)**:
+  - Додати на панель **лише одну нову кнопку**: **`Verify Duplicates`** (`pbVerifyDuplicates`), активну після завершення пошуку дублікатів.
+  - Існуючі кнопки **`Stop / Pause`**, **`Save State`**, **`Resume Check`** автоматично працюють із поточним активним етапом (`_active_stage`: `"hashing"` або `"verifying"`), визначаючи його за станом віджета або полем `memento.stage` після перезапуску програми.
+  - Після завершення верифікації оновлювати списки дублікатів підтвердженими даними та виводити підсумок верифікації у `_log_detailed_summary()`.
+- [ ] **6.4. Тестування Кроку 6**:
+  - Написати модульні тести `tests/test_duplicates_verifier.py` (багатопотокова верифікація розмірів, виявлення імітованої хеш-колізії з іншим розміром файлу, еквівалентність односесійної та багатосесійної верифікації з паузою/збереженням/перезапуском через `stage="verifying"`).
+
+---
+
+### Крок 7: Фінальне полірування перед злиттям гілки — `[ЗАПЛАНОВАНО]`
+- [ ] **7.1. Самоорганізація**: замінити `has_database()` на `is_valid_database()` та запускати `verify_catalog_actuality()` у режимі Self-Organization із виведенням звіту в лог/статус.
+- [ ] **7.2. Документація**: оновити [docs/organizer_diagram.md](file:///C:/Users/Oleksander/Alex/Projects/family_album/docs/organizer_diagram.md) та [README.md](file:///C:/Users/Oleksander/Alex/Projects/family_album/README.md).
+- [ ] **7.3. Гігієна репозиторію**: видалити мертвий [dataframe_model.py](file:///C:/Users/Oleksander/Alex/Projects/family_album/src/family_album/gui/dataframe_model.py) та додати `saves/`, `tests/saves/`, `*.db` у [.gitignore](file:///C:/Users/Oleksander/Alex/Projects/family_album/.gitignore).
+
+---
+
 ## 3. Відкладено на майбутні релізи (Backlog)
 - **Undo / Rollback (Відкат останньої організації)** — `[ВІДКЛАДЕНО]` (база даних `.db/album.db` вже зберігає всі пари `original_path` $\rightarrow$ `organized_path` для майбутньої реалізації).

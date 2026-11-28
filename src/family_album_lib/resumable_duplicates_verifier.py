@@ -71,10 +71,8 @@ class ResumableDuplicatesVerifier:
         self._num_of_threads: int = max(1, int(max_workers))
 
         # Normalize Stage 1 results to preserve across save/resume cycles
-        self._files_hashes: Dict[str, List[str]] = {
-            h: [os.path.normpath(p) for p in paths]
-            for h, paths in (files_hashes or {}).items()
-        }
+        self._files_hashes: Dict[str, List[str]] = self._normalize_hash_paths(files_hashes)
+
         if processed_files:
             self._processed_files: Dict[str, str] = {
                 os.path.normpath(p): h for p, h in processed_files.items()
@@ -114,6 +112,14 @@ class ResumableDuplicatesVerifier:
         self._stop_event: Event = Event()
         self._lock: Lock = Lock()
         self._worker_thread: Optional[Thread] = None
+
+    @staticmethod
+    def _normalize_hash_paths(files_hashes: dict[str, list[str]] | None) -> dict[str, list[str]]:
+        """Normalize all file paths in a Stage 1 `{hash_digest: [file_paths]}` mapping."""
+        return {
+            h: [os.path.normpath(p) for p in paths]
+            for h, paths in (files_hashes or {}).items()
+        }
 
     @staticmethod
     def _build_candidates_from_hashes(files_hashes: Dict[str, List[str]]) -> Dict[str, List[str]]:
@@ -245,10 +251,7 @@ class ResumableDuplicatesVerifier:
             self._files_count = memento.files_count
             self._subdirectories_count = memento.subdirectories_count
             self._processed_files = {os.path.normpath(k): v for k, v in memento.processed_files.items()}
-            self._files_hashes = {
-                h: [os.path.normpath(p) for p in paths]
-                for h, paths in memento.files_hashes.items()
-            }
+            self._files_hashes = self._normalize_hash_paths(memento.files_hashes)
             if self._files_hashes:
                 self._candidate_duplicates = self._build_candidates_from_hashes(self._files_hashes)
 
